@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import usePolling from '../hooks/usePolling';
 
 const statusColors = {
   submitted: 'bg-blue-100 text-blue-700',
@@ -26,15 +27,17 @@ export default function ApprovalQueue() {
   const [loading, setLoading] = useState(true);
   const limit = 10;
 
-  const fetchData = () => {
+  const fetchData = useCallback((silent = false) => {
+    const fetcher = () => api.get('/invoices/queue/pending', { params: { limit, offset: page * limit } })
+      .then(({ data }) => { setInvoices(data.data); setTotal(data.meta.total); });
+    if (silent) { fetcher().catch(() => {}); return; }
     setLoading(true);
-    api.get('/invoices/queue/pending', { params: { limit, offset: page * limit } })
-      .then(({ data }) => { setInvoices(data.data); setTotal(data.meta.total); })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  };
+    fetcher().catch(() => {}).finally(() => setLoading(false));
+  }, [page, limit]);
 
-  useEffect(() => { fetchData(); }, [page]);
+  useEffect(() => { fetchData(); }, [page, limit]);
+
+  usePolling(() => fetchData(true), 15000);
 
   const totalPages = Math.ceil(total / limit);
 

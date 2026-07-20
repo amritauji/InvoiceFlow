@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import usePolling from '../hooks/usePolling';
 
 const statusColors = {
   submitted: 'bg-blue-50 text-blue-700', under_review: 'bg-amber-50 text-amber-700',
@@ -22,17 +23,19 @@ export default function MySubmissions() {
   const [loading, setLoading] = useState(true);
   const limit = 10;
 
-  const fetchData = () => {
-    setLoading(true);
+  const fetchData = useCallback((silent = false) => {
     const params = { limit, offset: page * limit };
     if (statusFilter) params.status = statusFilter;
-    api.get('/invoices', { params })
-      .then(({ data }) => { setInvoices(data.data); setTotal(data.meta.total); })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  };
+    const fetcher = () => api.get('/invoices', { params })
+      .then(({ data }) => { setInvoices(data.data); setTotal(data.meta.total); });
+    if (silent) { fetcher().catch(() => {}); return; }
+    setLoading(true);
+    fetcher().catch(() => {}).finally(() => setLoading(false));
+  }, [page, limit, statusFilter]);
 
-  useEffect(() => { fetchData(); }, [page, statusFilter]);
+  useEffect(() => { fetchData(); }, [page, statusFilter, limit, fetchData]);
+
+  usePolling(() => fetchData(true), 15000);
 
   return (
     <div className="p-4 lg:p-6 space-y-6">

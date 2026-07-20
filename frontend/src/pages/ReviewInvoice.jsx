@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import usePolling from '../hooks/usePolling';
 
 const statusColors = {
   submitted: 'bg-blue-100 text-blue-700',
@@ -74,6 +75,13 @@ export default function ReviewInvoice() {
   useEffect(() => {
     fetchInvoice();
   }, [fetchInvoice]);
+
+  usePolling(() => {
+    if (!acting) {
+      api.get(`/invoices/${id}`).then(({ data }) => setInvoice(data.data)).catch(() => {});
+      api.get(`/invoices/${id}/history`).then(({ data }) => setHistory(data.data)).catch(() => {});
+    }
+  }, 15000);
 
   const handleAction = async (action) => {
     if (acting) return;

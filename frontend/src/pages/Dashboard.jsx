@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import usePolling from '../hooks/usePolling';
 
 const stageBadgeColors = {
   submitted: 'bg-blue-50 text-blue-700 border border-blue-200',
@@ -25,9 +26,16 @@ function Dashboard() {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    api.get('/dashboard/stats').then(({ data }) => setStats(data.data)).catch(() => {}).finally(() => setLoading(false));
+  const fetchStats = useCallback((silent = false) => {
+    const fetcher = () => api.get('/dashboard/stats').then(({ data }) => setStats(data.data));
+    if (silent) { fetcher().catch(() => {}); return; }
+    setLoading(true);
+    fetcher().catch(() => {}).finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => { fetchStats(); }, [fetchStats]);
+
+  usePolling(() => fetchStats(true), 15000);
 
   const s = stats?.summary || {};
   const kpis = [
