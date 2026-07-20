@@ -31,6 +31,5 @@ class Settings(BaseSettings):
     MAX_UPLOAD_SIZE: int = 10 * 1024 * 1024
 
 
-@lru_cache()
 def get_settings() -> Settings:
     return Settings()
