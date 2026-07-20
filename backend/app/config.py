@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     DATABASE_URL_SYNC: str = "postgresql://postgres:postgres@localhost:5432/postgres"
 
     FRONTEND_URL: str = "http://localhost:5173"
+    CORS_ORIGINS: str = ""
 
     # Storage bucket names
     STORAGE_BUCKET_ORIGINALS: str = "invoice-originals"
