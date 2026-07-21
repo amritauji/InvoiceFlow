@@ -145,6 +145,11 @@ class ApprovalActionRequest(BaseModel):
     comment: Optional[str] = None
 
 
+class BulkApprovalRequest(BaseModel):
+    invoice_ids: list[str]
+    comment: Optional[str] = None
+
+
 class ApprovalActionResponse(BaseModel):
     id: str
     invoice_id: str

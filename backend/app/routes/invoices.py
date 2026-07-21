@@ -1,6 +1,7 @@
 from typing import Optional
 from fastapi import APIRouter, Depends, Query, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func, or_
 
 from app.database import get_db
 from app.schemas import InvoiceCreate
@@ -104,6 +105,61 @@ async def list_invoices(
     }
 
 
+@router.get("/search")
+async def search_invoices(
+    q: str = Query(..., min_length=1),
+    limit: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    actor: UserContext = Depends(get_current_user),
+):
+    """Search invoices by invoice number, vendor name, or submitter name."""
+    from app.models.invoice import Invoice
+    from app.models.user import UserProfile
+    from app.models.department import Department
+
+    term = f"%{q}%"
+
+    query = (
+        select(Invoice, UserProfile.full_name, Department.name.label("department_name"))
+        .join(UserProfile, Invoice.submitted_by == UserProfile.id)
+        .outerjoin(Department, Invoice.department_id == Department.id)
+        .where(
+            or_(
+                Invoice.invoice_number.ilike(term),
+                Invoice.vendor_name.ilike(term),
+                UserProfile.full_name.ilike(term),
+            )
+        )
+        .order_by(Invoice.submitted_at.desc())
+        .limit(limit)
+    )
+
+    result = await db.execute(query)
+    rows = result.all()
+
+    invoices = []
+    for inv, submitter_name, department_name in rows:
+        invoices.append({
+            "id": str(inv.id),
+            "invoice_number": inv.invoice_number,
+            "vendor_name": inv.vendor_name,
+            "amount": float(inv.amount),
+            "remarks": inv.remarks,
+            "status": inv.status,
+            "department_name": department_name,
+            "submitted_by": str(inv.submitted_by),
+            "submitter_name": submitter_name,
+            "submitted_at": inv.submitted_at.isoformat() if inv.submitted_at else None,
+            "version": inv.version,
+        })
+
+    return {
+        "success": True,
+        "data": invoices,
+        "meta": {"total": len(invoices), "query": q},
+    }
+
+
 @router.get("/queue/pending")
 async def get_pending_queue(
     limit: int = Query(20, ge=1, le=100),
@@ -130,10 +186,21 @@ async def get_invoice(
     actor: UserContext = Depends(get_current_user),
 ):
     """Get invoice details with submitter info."""
+    from sqlalchemy import select as sa_select
+    from app.models.department import Department
+
     invoice, submitter_name = await InvoiceService.get_invoice_with_submitter(db, invoice_id)
 
     # Get files
     files = await FileService.list_files_for_invoice(db, invoice_id)
+
+    # Get department name
+    department_name = None
+    if invoice.department_id:
+        dept_result = await db.execute(
+            sa_select(Department.name).where(Department.id == invoice.department_id)
+        )
+        department_name = dept_result.scalar_one_or_none()
 
     return {
         "success": True,
@@ -147,6 +214,7 @@ async def get_invoice(
             "submitted_by": str(invoice.submitted_by),
             "submitter_name": submitter_name,
             "department_id": str(invoice.department_id) if invoice.department_id else None,
+            "department_name": department_name,
             "submitted_at": invoice.submitted_at.isoformat() if invoice.submitted_at else None,
             "current_stage_id": str(invoice.current_stage_id) if invoice.current_stage_id else None,
             "version": invoice.version,
@@ -195,6 +263,17 @@ async def update_invoice(
             "version": invoice.version,
         },
     }
+
+
+@router.delete("/{invoice_id}")
+async def delete_invoice(
+    invoice_id: str,
+    db: AsyncSession = Depends(get_db),
+    actor: UserContext = Depends(require_permission("invoice:delete")),
+):
+    """Delete an invoice. Only Accountant 1 and Admin can delete."""
+    await InvoiceService.delete_invoice(db, invoice_id, actor=actor)
+    return {"success": True, "data": {"message": "Invoice deleted successfully"}}
 
 
 @router.post("/{invoice_id}/upload")

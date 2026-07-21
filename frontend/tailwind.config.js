@@ -1,5 +1,6 @@
 /** @type {import('tailwindcss').Config} */
 export default {
+  darkMode: 'class',
   content: [
     "./index.html",
     "./src/**/*.{js,ts,jsx,tsx}",
@@ -53,7 +54,19 @@ export default {
         "surface-container": "#f0ecf9",
         "error-container": "#ffdad6",
         "surface": "#fcf8ff",
-        "surface-bright": "#fcf8ff"
+        "surface-bright": "#fcf8ff",
+
+        // Dark theme overrides
+        "dark-bg": "#0f1423",
+        "dark-surface": "#181d2e",
+        "dark-card": "#1e2538",
+        "dark-card-hover": "#242c42",
+        "dark-border": "#2e3650",
+        "dark-text": "#e1e3f0",
+        "dark-text-secondary": "#8d95b0",
+        "dark-indigo-500": "#6366f1",
+        "dark-indigo-600": "#4f46e5",
+        "dark-indigo-400": "#818cf8",
       },
       borderRadius: {
         DEFAULT: "0.25rem",

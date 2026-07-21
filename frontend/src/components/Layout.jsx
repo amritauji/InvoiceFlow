@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useTheme } from '../context/ThemeContext';
 import logo from '../assets/logo.png';
 
 const navSections = [
@@ -40,13 +41,24 @@ const roleLabels = {
 
 function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuth();
+  const { dark, toggleTheme } = useTheme();
 
   useEffect(() => {
     setSidebarOpen(false);
   }, [location.pathname]);
+
+  const handleSearch = (e) => {
+    e.preventDefault();
+    const q = searchQuery.trim();
+    if (q) {
+      navigate(`/search?q=${encodeURIComponent(q)}`);
+      setSearchQuery('');
+    }
+  };
 
   const handleLogout = () => {
     logout();
@@ -56,38 +68,59 @@ function Layout() {
   const initials = user?.full_name?.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || '??';
 
   return (
-    <div className="min-h-screen bg-gray-50 text-gray-900 font-sans">
+    <div className="min-h-screen bg-gray-50 dark:bg-[#0f1423] text-gray-900 dark:text-[#e1e3f0] font-sans transition-colors">
       {sidebarOpen && (
         <div className="fixed inset-0 bg-black/40 z-40 lg:hidden backdrop-blur-sm" onClick={() => setSidebarOpen(false)} />
       )}
 
-      <aside className={`fixed top-0 left-0 h-full w-[280px] z-50 bg-white border-r border-gray-200 flex flex-col transform transition-transform duration-300 ease-in-out lg:hidden ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+      <aside className={`fixed top-0 left-0 h-full w-[280px] z-50 bg-white dark:bg-[#181d2e] border-r border-gray-200 dark:border-[#2e3650] flex flex-col transform transition-transform duration-300 ease-in-out lg:hidden ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <SidebarContent onClose={() => setSidebarOpen(false)} user={user} onLogout={handleLogout} />
       </aside>
 
-      <aside className="hidden lg:flex fixed top-0 left-0 h-full w-[260px] z-30 bg-white border-r border-gray-200 flex-col">
+      <aside className="hidden lg:flex fixed top-0 left-0 h-full w-[260px] z-30 bg-white dark:bg-[#181d2e] border-r border-gray-200 dark:border-[#2e3650] flex-col">
         <SidebarContent user={user} onLogout={handleLogout} />
       </aside>
 
       <div className="lg:ml-[260px] flex flex-col min-h-screen">
-        <header className="sticky top-0 z-20 bg-white/80 backdrop-blur-md border-b border-gray-200 h-16 flex items-center px-4 lg:px-6 gap-4">
-          <button className="lg:hidden p-2 -ml-2 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors" onClick={() => setSidebarOpen(true)}>
-            <span className="material-symbols-outlined">menu</span>
-          </button>
-          <div className="flex-1" />
-          <div className="flex items-center gap-1">
-            <button className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors">
+        <header className="sticky top-0 z-20 bg-white/80 dark:bg-[#0f1423]/80 backdrop-blur-md border-b border-gray-200 dark:border-[#2e3650] h-16 flex items-center justify-between px-4 lg:px-6 transition-colors">
+          {sidebarOpen && <div className="fixed inset-0 z-40 lg:hidden" onClick={() => setSidebarOpen(false)} />}
+          <div className="flex items-center gap-3 min-w-0">
+            <button className="lg:hidden p-2 -ml-2 rounded-lg text-gray-500 dark:text-[#8d95b0] hover:bg-gray-100 dark:hover:bg-[#1e2538] hover:text-gray-700 dark:hover:text-[#e1e3f0] transition-colors shrink-0" onClick={() => setSidebarOpen(true)}>
+              <span className="material-symbols-outlined text-[22px]">menu</span>
+            </button>
+            <form onSubmit={handleSearch} className="w-64 min-w-0">
+              <div className="relative">
+                <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[18px] text-gray-400 dark:text-[#8d95b0] pointer-events-none">search</span>
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search invoices..."
+                  className="w-full pl-9 pr-4 py-2 text-sm bg-gray-100 dark:bg-[#1e2538] border border-transparent rounded-lg text-gray-900 dark:text-[#e1e3f0] placeholder:text-gray-400 dark:placeholder:text-[#8d95b0] focus:bg-white dark:focus:bg-[#242c42] focus:border-indigo-300 focus:ring-1 focus:ring-indigo-300 outline-none transition-colors"
+                />
+              </div>
+            </form>
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              onClick={toggleTheme}
+              className="p-2 rounded-lg text-gray-500 dark:text-[#8d95b0] hover:bg-gray-100 dark:hover:bg-[#1e2538] hover:text-gray-700 dark:hover:text-[#e1e3f0] transition-colors"
+              title={dark ? 'Switch to light mode' : 'Switch to dark mode'}
+            >
+              <span className="material-symbols-outlined text-[22px]">{dark ? 'light_mode' : 'dark_mode'}</span>
+            </button>
+            <button className="p-2 rounded-lg text-gray-500 dark:text-[#8d95b0] hover:bg-gray-100 dark:hover:bg-[#1e2538] hover:text-gray-700 dark:hover:text-[#e1e3f0] transition-colors">
               <span className="material-symbols-outlined text-[22px]">notifications</span>
             </button>
-            <div className="w-px h-6 bg-gray-200 mx-1" />
-            <div className="flex items-center gap-2.5 p-1.5 pr-3 rounded-lg">
-              <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 text-xs font-bold">{initials}</div>
-              <div className="hidden sm:flex flex-col items-start">
-                <span className="text-sm font-medium text-gray-700 leading-tight">{user?.full_name || 'User'}</span>
-                <span className="text-[11px] text-gray-400 leading-tight">{roleLabels[user?.role] || user?.role || ''}</span>
+            <div className="w-px h-6 bg-gray-200 dark:bg-[#2e3650] mx-1" />
+            <div className="flex items-center gap-2 pl-1">
+              <div className="w-8 h-8 rounded-full bg-indigo-100 dark:bg-indigo-900/50 flex items-center justify-center text-indigo-700 dark:text-indigo-400 text-xs font-bold shrink-0">{initials}</div>
+              <div className="hidden sm:flex flex-col items-start min-w-0">
+                <span className="text-sm font-medium text-gray-700 dark:text-[#e1e3f0] leading-tight truncate max-w-[120px]">{user?.full_name || 'User'}</span>
+                <span className="text-[11px] text-gray-400 dark:text-[#8d95b0] leading-tight">{roleLabels[user?.role] || user?.role || ''}</span>
               </div>
             </div>
-            <button onClick={handleLogout} className="p-2 rounded-lg text-gray-400 hover:bg-red-50 hover:text-red-600 transition-colors" title="Logout">
+            <button onClick={handleLogout} className="p-2 ml-1 rounded-lg text-gray-400 dark:text-[#8d95b0] hover:bg-red-50 dark:hover:bg-red-900/20 hover:text-red-600 dark:hover:text-red-400 transition-colors" title="Logout">
               <span className="material-symbols-outlined text-[20px]">logout</span>
             </button>
           </div>
@@ -106,16 +139,16 @@ function SidebarContent({ onClose, user, onLogout }) {
 
   return (
     <>
-      <div className="px-5 h-16 flex items-center justify-between border-b border-gray-100 shrink-0">
+      <div className="px-5 h-16 flex items-center justify-between border-b border-gray-100 dark:border-[#2e3650] shrink-0 transition-colors">
         <div className="flex items-center gap-3">
           <img src={logo} alt="InvoiceFlow" className="w-9 h-9 rounded-lg" />
           <div className="flex flex-col">
-            <span className="text-[15px] font-bold text-gray-900 leading-tight">InvoiceFlow</span>
-            <span className="text-[10px] text-gray-400 font-medium uppercase tracking-wider leading-tight">Enterprise</span>
+            <span className="text-[15px] font-bold text-gray-900 dark:text-[#e1e3f0] leading-tight">InvoiceFlow</span>
+            <span className="text-[10px] text-gray-400 dark:text-[#8d95b0] font-medium uppercase tracking-wider leading-tight">Enterprise</span>
           </div>
         </div>
         {onClose && (
-          <button onClick={onClose} className="p-1.5 -mr-1.5 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors lg:hidden">
+          <button onClick={onClose} className="p-1.5 -mr-1.5 rounded-lg text-gray-400 dark:text-[#8d95b0] hover:bg-gray-100 dark:hover:bg-[#1e2538] hover:text-gray-600 dark:hover:text-[#e1e3f0] transition-colors lg:hidden">
             <span className="material-symbols-outlined text-[20px]">close</span>
           </button>
         )}
@@ -126,13 +159,13 @@ function SidebarContent({ onClose, user, onLogout }) {
           if (visibleItems.length === 0) return null;
           return (
             <div key={section.label}>
-              <p className="px-3 mb-2 text-[10px] font-semibold text-gray-400 uppercase tracking-widest">{section.label}</p>
+              <p className="px-3 mb-2 text-[10px] font-semibold text-gray-400 dark:text-[#8d95b0] uppercase tracking-widest">{section.label}</p>
               <div className="space-y-0.5">
                 {visibleItems.map((item) => {
                   const isActive = loc.pathname === item.to || loc.pathname.startsWith(item.to + '/');
                   return (
-                    <NavLink key={item.to} to={item.to} className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-all duration-150 ${isActive ? 'bg-indigo-50 text-indigo-700' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'}`}>
-                      <span className={`material-symbols-outlined text-[20px] ${isActive ? 'text-indigo-600' : 'text-gray-400'}`}>{item.icon}</span>
+                    <NavLink key={item.to} to={item.to} className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-all duration-150 ${isActive ? 'bg-indigo-50 dark:bg-indigo-600/15 text-indigo-700 dark:text-indigo-400' : 'text-gray-600 dark:text-[#8d95b0] hover:bg-gray-50 dark:hover:bg-[#1e2538] hover:text-gray-900 dark:hover:text-[#e1e3f0]'}`}>
+                      <span className={`material-symbols-outlined text-[20px] ${isActive ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-400 dark:text-[#8d95b0]'}`}>{item.icon}</span>
                       {item.label}
                     </NavLink>
                   );
@@ -142,8 +175,8 @@ function SidebarContent({ onClose, user, onLogout }) {
           );
         })}
       </nav>
-      <div className="p-3 border-t border-gray-100 shrink-0">
-        <button onClick={onLogout} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium text-gray-500 hover:bg-red-50 hover:text-red-600 transition-all">
+      <div className="p-3 border-t border-gray-100 dark:border-[#2e3650] shrink-0 transition-colors">
+        <button onClick={onLogout} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium text-gray-500 dark:text-[#8d95b0] hover:bg-red-50 dark:hover:bg-red-900/20 hover:text-red-600 dark:hover:text-red-400 transition-all">
           <span className="material-symbols-outlined text-[20px]">logout</span>
           Sign Out
         </button>

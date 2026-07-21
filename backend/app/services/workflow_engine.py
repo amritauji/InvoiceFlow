@@ -9,7 +9,10 @@ Workflow stages (in order):
 
 Status transitions:
   submitted  → under_review    (when accountant_1 verifies)
-  under_review → approved      (when final approver acts)
+  under_review → under_review  (when intermediate approver approves)
+  under_review → approved      (when final approver approves)
+  submitted/under_review → returned  (returned to submitter for corrections)
+  submitted/under_review → rejected  (rejected, terminal state)
 
 Admin users can act at any stage (superuser bypass).
 """
@@ -77,7 +80,7 @@ def get_first_stage() -> dict:
 
 def get_next_approver_info(current_stage_order: int | None, invoice_status: str) -> dict | None:
     """Get info about who the invoice goes to next."""
-    if invoice_status in ("approved", "rejected"):
+    if invoice_status in ("approved", "rejected", "returned"):
         return None
     if invoice_status == "submitted":
         return {"role": "accountant_1", "role_display": "Accountant 1", "stage": "Accountant 1 Verification"}
@@ -148,10 +151,58 @@ def validate_approval(actor_role: UserRole, invoice_status: str, invoice_stage_o
 
 
 def validate_rejection(actor_role: UserRole, invoice_status: str, invoice_stage_order: int | None) -> None:
-    """Rejection is disabled — kept for backward compatibility with existing data."""
-    raise BadRequestException("Rejection is not supported. Only approval is allowed.")
+    """
+    Validate whether the actor can reject the invoice.
+    Any approver at the current stage (or Admin) can reject.
+    Rejection is terminal — the invoice goes to 'rejected' status.
+    """
+    if invoice_status in ("approved", "rejected", "returned"):
+        raise BadRequestException(f"Cannot reject invoice with status '{invoice_status}'")
+
+    if invoice_status == "draft":
+        raise BadRequestException("Cannot reject a draft invoice.")
+
+    if invoice_status == "submitted":
+        if actor_role not in (UserRole.ACCOUNTANT_1, UserRole.ADMIN):
+            raise ForbiddenException("Only Accountant 1 (or Admin) can reject newly submitted invoices")
+    elif invoice_status == "under_review":
+        if invoice_stage_order is None:
+            raise BadRequestException("Invoice has no current stage assigned")
+        if not can_role_act_at_stage(actor_role, invoice_stage_order):
+            expected = get_role_for_stage(invoice_stage_order)
+            raise ForbiddenException(
+                f"This invoice is at stage {invoice_stage_order} "
+                f"(requires {ROLE_DISPLAY_NAMES.get(expected, expected.value if expected else 'unknown')}), "
+                f"but your role is {ROLE_DISPLAY_NAMES.get(actor_role, actor_role.value)}"
+            )
+    else:
+        raise BadRequestException(f"Cannot reject invoice in '{invoice_status}' status")
 
 
 def validate_return(actor_role: UserRole, invoice_status: str, invoice_stage_order: int | None) -> None:
-    """Return is disabled — kept for backward compatibility with existing data."""
-    raise BadRequestException("Return is not supported. Only approval is allowed.")
+    """
+    Validate whether the actor can return the invoice to the submitter.
+    Any approver at the current stage (or Admin) can return.
+    Return sends the invoice back to 'returned' status so the submitter can fix and resubmit.
+    """
+    if invoice_status in ("approved", "rejected", "returned"):
+        raise BadRequestException(f"Cannot return invoice with status '{invoice_status}'")
+
+    if invoice_status == "draft":
+        raise BadRequestException("Cannot return a draft invoice.")
+
+    if invoice_status == "submitted":
+        if actor_role not in (UserRole.ACCOUNTANT_1, UserRole.ADMIN):
+            raise ForbiddenException("Only Accountant 1 (or Admin) can return newly submitted invoices")
+    elif invoice_status == "under_review":
+        if invoice_stage_order is None:
+            raise BadRequestException("Invoice has no current stage assigned")
+        if not can_role_act_at_stage(actor_role, invoice_stage_order):
+            expected = get_role_for_stage(invoice_stage_order)
+            raise ForbiddenException(
+                f"This invoice is at stage {invoice_stage_order} "
+                f"(requires {ROLE_DISPLAY_NAMES.get(expected, expected.value if expected else 'unknown')}), "
+                f"but your role is {ROLE_DISPLAY_NAMES.get(actor_role, actor_role.value)}"
+            )
+    else:
+        raise BadRequestException(f"Cannot return invoice in '{invoice_status}' status")

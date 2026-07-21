@@ -209,12 +209,12 @@ class InvoiceService:
         *,
         actor: UserContext,
     ) -> None:
-        """Delete a draft invoice."""
+        """Delete an invoice. Accountant 1 and Admin can delete any invoice."""
         invoice = await InvoiceService.get_invoice(db, invoice_id)
 
-        if str(invoice.submitted_by) != actor.id and actor.role != UserRole.ADMIN:
-            raise ForbiddenException("You can only delete your own invoices")
-        if invoice.status != "draft":
-            raise BadRequestException("Only draft invoices can be deleted")
+        if actor.role not in (UserRole.ADMIN, UserRole.ACCOUNTANT_1):
+            raise ForbiddenException("Only Admin or Accountant 1 can delete invoices")
+        if invoice.status not in ("submitted", "returned", "rejected"):
+            raise BadRequestException(f"Cannot delete invoice in '{invoice.status}' status")
 
         await db.delete(invoice)

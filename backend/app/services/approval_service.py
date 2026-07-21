@@ -12,6 +12,7 @@ from sqlalchemy import select, func
 from app.models.invoice import Invoice
 from app.models.approval import ApprovalAction
 from app.models.user import UserProfile
+from app.models.department import Department
 from app.core.dependencies import UserContext, UserRole
 from app.core.exceptions import NotFoundException, BadRequestException
 from app.services.workflow_engine import (
@@ -405,27 +406,24 @@ class ApprovalService:
         """
         # Determine which statuses/stages to filter by
         if actor.role == UserRole.ADMIN:
-            # Admin sees everything non-terminal
             query = (
-                select(Invoice, UserProfile.full_name)
+                select(Invoice, UserProfile.full_name, Department.name.label("department_name"))
                 .join(UserProfile, Invoice.submitted_by == UserProfile.id)
+                .outerjoin(Department, Invoice.department_id == Department.id)
                 .where(Invoice.status.in_(["submitted", "under_review"]))
             )
         elif actor.role == UserRole.ACCOUNTANT_1:
-            # Accountant 1 sees submitted invoices
             query = (
-                select(Invoice, UserProfile.full_name)
+                select(Invoice, UserProfile.full_name, Department.name.label("department_name"))
                 .join(UserProfile, Invoice.submitted_by == UserProfile.id)
+                .outerjoin(Department, Invoice.department_id == Department.id)
                 .where(Invoice.status == "submitted")
             )
         else:
-            # Approver roles (accountant_2, manager, ceo): see under_review invoices at their stage
             stage_order = ROLE_TO_STAGE_ORDER.get(actor.role)
             if stage_order is None:
                 return [], 0
 
-            # We need to find invoices where the number of approvals = stage_order - 1
-            # and status is "under_review"
             approvals_subquery = (
                 select(
                     ApprovalAction.invoice_id,
@@ -436,8 +434,9 @@ class ApprovalService:
             ).subquery()
 
             query = (
-                select(Invoice, UserProfile.full_name)
+                select(Invoice, UserProfile.full_name, Department.name.label("department_name"))
                 .join(UserProfile, Invoice.submitted_by == UserProfile.id)
+                .outerjoin(Department, Invoice.department_id == Department.id)
                 .outerjoin(approvals_subquery, Invoice.id == approvals_subquery.c.invoice_id)
                 .where(
                     Invoice.status == "under_review",
@@ -445,24 +444,24 @@ class ApprovalService:
                 )
             )
 
-        # Count
         total_result = await db.execute(select(func.count()).select_from(query.subquery()))
         total = total_result.scalar()
 
-        # Fetch page
         result = await db.execute(
             query.order_by(Invoice.submitted_at.desc()).limit(limit).offset(offset)
         )
         rows = result.all()
 
         invoices = []
-        for inv, submitter_name in rows:
+        for inv, submitter_name, department_name in rows:
             invoices.append({
                 "id": str(inv.id),
                 "invoice_number": inv.invoice_number,
                 "vendor_name": inv.vendor_name,
                 "amount": float(inv.amount),
+                "remarks": inv.remarks,
                 "status": inv.status,
+                "department_name": department_name,
                 "submitted_by": str(inv.submitted_by),
                 "submitter_name": submitter_name,
                 "submitted_at": inv.submitted_at.isoformat() if inv.submitted_at else None,

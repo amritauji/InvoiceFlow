@@ -82,7 +82,7 @@ ROLE_PERMISSIONS: dict[UserRole, set[str]] = {
         "audit:read", "dashboard:stats_all", "file:download",
     },
     UserRole.ACCOUNTANT_1: {
-        "invoice:read_all", "approval:verify", "approval:approve",
+        "invoice:read_all", "invoice:delete", "approval:verify", "approval:approve",
         "approval:reject", "approval:return", "approval:comment",
         "audit:read", "dashboard:stats_all", "file:download",
     },

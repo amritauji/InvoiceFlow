@@ -10,6 +10,7 @@ import ApprovalQueue from './pages/ApprovalQueue';
 import MySubmissions from './pages/MySubmissions';
 import AuditTrail from './pages/AuditTrail';
 import AdminManagement from './pages/AdminManagement';
+import SearchResults from './pages/SearchResults';
 
 function App() {
   return (
@@ -22,6 +23,7 @@ function App() {
         <Route path="invoices/:id" element={<ReviewInvoice />} />
         <Route path="invoices/:id/print" element={<PrintApproval />} />
         <Route path="approvals" element={<ApprovalQueue />} />
+        <Route path="search" element={<SearchResults />} />
         <Route path="invoices" element={<MySubmissions />} />
         <Route path="audit" element={<ProtectedRoute allowedRoles={['admin','accountant_1','accountant_2','manager','ceo']}><AuditTrail /></ProtectedRoute>} />
         <Route path="admin" element={<ProtectedRoute allowedRoles={['admin']}><AdminManagement /></ProtectedRoute>} />

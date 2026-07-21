@@ -3,11 +3,44 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.schemas import ApprovalActionRequest
+from app.schemas import ApprovalActionRequest, BulkApprovalRequest
 from app.services.approval_service import ApprovalService
 from app.core.dependencies import get_current_user, require_permission, UserContext, UserRole
 
 router = APIRouter(prefix="/invoices", tags=["Approvals"])
+
+
+@router.post("/bulk-approve")
+async def bulk_approve_invoices(
+    body: BulkApprovalRequest,
+    db: AsyncSession = Depends(get_db),
+    actor: UserContext = Depends(require_permission("approval:approve")),
+):
+    """Approve multiple invoices at once."""
+    if not body.invoice_ids:
+        from app.core.exceptions import BadRequestException
+        raise BadRequestException("No invoice IDs provided")
+
+    results = []
+    for invoice_id in body.invoice_ids:
+        try:
+            result = await ApprovalService.approve(db, invoice_id, actor=actor, comment=body.comment)
+            results.append({"invoice_id": invoice_id, "success": True, "data": result})
+        except Exception as e:
+            results.append({"invoice_id": invoice_id, "success": False, "error": str(e)})
+
+    approved = sum(1 for r in results if r["success"])
+    failed = sum(1 for r in results if not r["success"])
+
+    return {
+        "success": True,
+        "data": {
+            "total": len(body.invoice_ids),
+            "approved": approved,
+            "failed": failed,
+            "results": results,
+        },
+    }
 
 
 @router.post("/{invoice_id}/approve")
