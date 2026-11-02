@@ -80,6 +80,7 @@ async def generate_invoice_pdf(
 ):
     """Generate and download a PDF for an invoice."""
     invoice, submitter_name = await InvoiceService.get_invoice_with_submitter(db, invoice_id)
+    InvoiceService.assert_can_view(actor, invoice)
 
     # Get department name
     from app.models.user import UserProfile
@@ -109,6 +110,7 @@ async def generate_invoice_pdf(
         invoice_number=invoice.invoice_number,
         vendor_name=invoice.vendor_name,
         amount=float(invoice.amount),
+        currency=invoice.currency or "INR",
         status=invoice.status,
         submitted_at=invoice.submitted_at.strftime("%Y-%m-%d") if invoice.submitted_at else "",
         submitter_name=submitter_name,

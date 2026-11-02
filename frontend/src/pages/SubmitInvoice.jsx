@@ -1,11 +1,14 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import { currencySymbol } from '../utils/currency';
+import { getErrorMessage } from '../utils/error';
 
 function SubmitInvoice() {
   const navigate = useNavigate();
   const [vendorName, setVendorName] = useState('');
   const [amount, setAmount] = useState('');
+  const [currency, setCurrency] = useState('INR');
   const [remarks, setRemarks] = useState('');
   const [departmentId, setDepartmentId] = useState('');
   const [departments, setDepartments] = useState([]);
@@ -41,6 +44,7 @@ function SubmitInvoice() {
       const formData = new FormData();
       formData.append('vendor_name', vendorName);
       formData.append('amount', amount);
+      formData.append('currency', currency);
       if (remarks) formData.append('remarks', remarks);
       if (departmentId) formData.append('department_id', departmentId);
       formData.append('file', file);
@@ -48,7 +52,7 @@ function SubmitInvoice() {
       alert('Invoice submitted successfully!');
       navigate('/invoices');
     } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to submit invoice. Please try again.');
+      setError(getErrorMessage(err, 'Failed to submit invoice. Please try again.'));
     } finally {
       setIsSubmitting(false);
     }
@@ -79,10 +83,22 @@ function SubmitInvoice() {
                     <input className="w-full h-10 px-3 rounded-lg border border-gray-200 dark:border-[#2e3650] text-sm text-gray-900 dark:text-[#e1e3f0] dark:bg-[#242c42] focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-colors placeholder:text-gray-400 dark:placeholder:text-[#8d95b0]" id="vendorName" placeholder="e.g. Acme Corp" required type="text" value={vendorName} onChange={(e) => setVendorName(e.target.value)} />
                   </div>
                   <div>
-                    <label className="block text-[11px] font-semibold text-gray-500 dark:text-[#8d95b0] uppercase tracking-wider mb-1.5" htmlFor="amount">Total Amount (INR) *</label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-[#8d95b0] text-sm">INR</span>
-                      <input className="w-full h-10 pl-10 pr-3 rounded-lg border border-gray-200 dark:border-[#2e3650] text-sm text-gray-900 dark:text-[#e1e3f0] dark:bg-[#242c42] focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-colors placeholder:text-gray-400 dark:placeholder:text-[#8d95b0]" id="amount" min="0" placeholder="0.00" required step="0.01" type="number" value={amount} onChange={(e) => setAmount(e.target.value)} />
+                    <label className="block text-[11px] font-semibold text-gray-500 dark:text-[#8d95b0] uppercase tracking-wider mb-1.5" htmlFor="amount">Total Amount *</label>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_110px]">
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-[#8d95b0] text-sm">{currencySymbol(currency)}</span>
+                        <input className="w-full h-10 pl-8 pr-3 rounded-lg border border-gray-200 dark:border-[#2e3650] text-sm text-gray-900 dark:text-[#e1e3f0] dark:bg-[#242c42] focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-colors placeholder:text-gray-400 dark:placeholder:text-[#8d95b0]" id="amount" min="0" placeholder="0.00" required step="0.01" type="number" value={amount} onChange={(e) => setAmount(e.target.value)} />
+                      </div>
+                      <select
+                        className="w-full h-10 px-2.5 rounded-lg border border-gray-200 dark:border-[#2e3650] text-sm text-gray-900 dark:text-[#e1e3f0] dark:bg-[#242c42] focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-colors bg-white"
+                        id="currency"
+                        aria-label="Currency"
+                        value={currency}
+                        onChange={(e) => setCurrency(e.target.value)}
+                      >
+                        <option value="INR">INR</option>
+                        <option value="USD">USD</option>
+                      </select>
                     </div>
                   </div>
                   <div className="md:col-span-2">

@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator
 
 
 # --- Auth ---
@@ -29,13 +29,43 @@ class UserCreate(BaseModel):
     department_id: Optional[str] = None
     phone: Optional[str] = None
 
+    @field_validator("password")
+    @classmethod
+    def validate_password_strength(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters")
+        if not any(c.isupper() for c in v):
+            raise ValueError("Password must contain at least one uppercase letter")
+        if not any(c.islower() for c in v):
+            raise ValueError("Password must contain at least one lowercase letter")
+        if not any(c.isdigit() for c in v):
+            raise ValueError("Password must contain at least one digit")
+        return v
+
 
 class UserUpdate(BaseModel):
     full_name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    password: Optional[str] = None
     role: Optional[str] = None
     department_id: Optional[str] = None
     phone: Optional[str] = None
     is_active: Optional[bool] = None
+
+    @field_validator("password")
+    @classmethod
+    def validate_password_strength(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters")
+        if not any(c.isupper() for c in v):
+            raise ValueError("Password must contain at least one uppercase letter")
+        if not any(c.islower() for c in v):
+            raise ValueError("Password must contain at least one lowercase letter")
+        if not any(c.isdigit() for c in v):
+            raise ValueError("Password must contain at least one digit")
+        return v
 
 
 class UserResponse(BaseModel):
@@ -80,13 +110,29 @@ class DepartmentResponse(BaseModel):
 class InvoiceCreate(BaseModel):
     vendor_name: str
     amount: float
+    currency: str = "INR"
     remarks: Optional[str] = None
+
+    @field_validator("currency")
+    @classmethod
+    def _validate_currency(cls, v: str) -> str:
+        if v not in ("INR", "USD"):
+            raise ValueError("Currency must be INR or USD")
+        return v
 
 
 class InvoiceUpdate(BaseModel):
     vendor_name: Optional[str] = None
     amount: Optional[float] = None
+    currency: Optional[str] = None
     remarks: Optional[str] = None
+
+    @field_validator("currency")
+    @classmethod
+    def _validate_currency(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and v not in ("INR", "USD"):
+            raise ValueError("Currency must be INR or USD")
+        return v
 
 
 class InvoiceResponse(BaseModel):
@@ -94,6 +140,7 @@ class InvoiceResponse(BaseModel):
     invoice_number: str
     vendor_name: str
     amount: float
+    currency: str
     remarks: Optional[str] = None
     status: str
     submitted_by: str
@@ -113,6 +160,7 @@ class InvoiceListResponse(BaseModel):
     invoice_number: str
     vendor_name: str
     amount: float
+    currency: str
     status: str
     submitted_by: str
     submitter_name: Optional[str] = None
@@ -195,3 +243,36 @@ class PaginatedResponse(BaseModel):
     success: bool = True
     data: list = []
     meta: dict = {}
+
+
+# --- Statement ---
+class StatementResponse(BaseModel):
+    id: str
+    statement_number: str
+    card_last_four: Optional[str] = None
+    card_holder_name: Optional[str] = None
+    billing_period: Optional[str] = None
+    total_amount_due: Optional[float] = None
+    total_transactions: int
+    status: str
+    remarks: Optional[str] = None
+    submitted_by: str
+    submitter_name: Optional[str] = None
+    submitted_at: datetime
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class StatementTransactionResponse(BaseModel):
+    id: str
+    statement_id: str
+    transaction_date: str
+    description: str
+    amount: float
+    is_verified: bool
+    verified_by: Optional[str] = None
+    verified_at: Optional[datetime] = None
+    row_index: int
+
+    model_config = {"from_attributes": True}

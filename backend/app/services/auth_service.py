@@ -1,17 +1,36 @@
 import uuid
+import logging
 from typing import Optional
+import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, text
 
-from app.core.security import get_supabase_client
+from app.core.security import get_auth_client
 from app.core.exceptions import NotFoundException, BadRequestException, ConflictException
 from app.core.dependencies import UserRole
 from app.models.user import UserProfile
 from app.config import get_settings
 
+logger = logging.getLogger("app.auth")
+
 settings = get_settings()
 
 VALID_ROLES = [r.value for r in UserRole]
+
+# Reusable httpx client for admin API calls (bypasses supabase SDK quirks)
+_admin_http = httpx.Client(timeout=15)
+
+
+def _admin_headers():
+    return {
+        "apikey": settings.SUPABASE_SERVICE_KEY,
+        "Authorization": f"Bearer {settings.SUPABASE_SERVICE_KEY}",
+        "Content-Type": "application/json",
+    }
+
+
+def _admin_base():
+    return f"{settings.SUPABASE_URL}/auth/v1/admin"
 
 
 class AuthService:
@@ -19,7 +38,7 @@ class AuthService:
 
     @staticmethod
     def _get_auth_client():
-        return get_supabase_client().auth
+        return get_auth_client().auth
 
     @staticmethod
     async def login(email: str, password: str) -> dict:
@@ -73,18 +92,29 @@ class AuthService:
         if existing.scalar_one_or_none():
             raise ConflictException(f"User with email '{email}' already exists")
 
-        # Create in Supabase Auth
-        auth = AuthService._get_auth_client()
-        response = auth.admin.create_user({
-            "email": email,
-            "password": password,
-            "email_confirm": True,  # Skip email verification for internal app
-        })
-
-        if not response or not response.user:
-            raise BadRequestException("Failed to create user in authentication system")
-
-        supabase_user_id = response.user.id
+        # Create in Supabase Auth via direct HTTP (avoids SDK issues)
+        try:
+            resp = _admin_http.post(
+                f"{_admin_base()}/users",
+                headers=_admin_headers(),
+                json={
+                    "email": email,
+                    "password": password,
+                    "email_confirm": True,
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            supabase_user_id = data["id"]
+        except httpx.HTTPStatusError as exc:
+            logger.error("Supabase create_user failed: %s %s", exc.response.status_code, exc.response.text[:300])
+            raise BadRequestException(
+                f"Failed to create user in authentication system: "
+                f"Supabase returned {exc.response.status_code}"
+            )
+        except Exception as exc:
+            logger.error("Supabase create_user error: %s", exc)
+            raise BadRequestException(f"Failed to create user in authentication system: {exc}")
 
         # Create profile
         profile = UserProfile(
@@ -146,12 +176,14 @@ class AuthService:
         user_id: str,
         *,
         full_name: Optional[str] = None,
+        email: Optional[str] = None,
+        password: Optional[str] = None,
         role: Optional[str] = None,
         department_id: Optional[str] = None,
         phone: Optional[str] = None,
         is_active: Optional[bool] = None,
     ) -> UserProfile:
-        """Update a user profile."""
+        """Update a user profile. If email or password changes, syncs to Supabase Auth."""
         profile = await AuthService.get_profile(db, user_id)
 
         if full_name is not None:
@@ -167,4 +199,69 @@ class AuthService:
         if is_active is not None:
             profile.is_active = is_active
 
+        # Sync email change to Supabase Auth via direct HTTP
+        if email is not None and email != profile.email:
+            try:
+                resp = _admin_http.put(
+                    f"{_admin_base()}/users/{user_id}",
+                    headers=_admin_headers(),
+                    json={"email": email, "email_confirm": True},
+                )
+                resp.raise_for_status()
+                profile.email = email
+            except Exception as exc:
+                logger.warning("Could not update Supabase Auth email for %s: %s", user_id, exc)
+                raise BadRequestException(f"Failed to update email in authentication system: {exc}")
+
+        # Sync password change to Supabase Auth via direct HTTP
+        if password is not None:
+            try:
+                resp = _admin_http.put(
+                    f"{_admin_base()}/users/{user_id}",
+                    headers=_admin_headers(),
+                    json={"password": password},
+                )
+                resp.raise_for_status()
+            except Exception as exc:
+                logger.warning("Could not update Supabase Auth password for %s: %s", user_id, exc)
+                raise BadRequestException(f"Failed to update password in authentication system: {exc}")
+
         return profile
+
+    @staticmethod
+    async def delete_user(db: AsyncSession, user_id: str) -> dict:
+        """Delete or soft-delete a user.
+
+        Tries hard delete. If FK violation occurs, falls back to
+        deactivating the user via raw SQL (avoids broken session state).
+
+        Returns a dict with the result.
+        """
+        from sqlalchemy.exc import IntegrityError
+
+        profile = await AuthService.get_profile(db, user_id)
+
+        # Attempt to delete from Supabase Auth via direct HTTP
+        try:
+            resp = _admin_http.delete(
+                f"{_admin_base()}/users/{user_id}",
+                headers=_admin_headers(),
+            )
+            if resp.status_code not in (200, 404):
+                logger.warning("Supabase delete_user returned %s: %s", resp.status_code, resp.text[:200])
+        except Exception as exc:
+            logger.warning("Could not delete Supabase Auth user %s: %s", user_id, exc)
+
+        # Try hard delete — if FK violation, soft delete via raw SQL
+        try:
+            await db.delete(profile)
+            await db.flush()
+            return {"action": "deleted", "message": "User deleted successfully"}
+        except IntegrityError:
+            await db.rollback()
+            await db.execute(
+                text("UPDATE user_profiles SET is_active = false WHERE id = :uid"),
+                {"uid": user_id},
+            )
+            await db.commit()
+            return {"action": "deactivated", "message": "User deactivated (has existing invoices)"}

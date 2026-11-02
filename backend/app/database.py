@@ -11,8 +11,12 @@ if _db_url.startswith("postgresql://") or _db_url.startswith("postgres://"):
 engine = create_async_engine(
     _db_url,
     echo=settings.APP_ENV == "development",
+    # Supabase's pgBouncer (session pooling) caps clients at 15. The app must
+    # never exceed that or bursts >15 get rejected with EMAXCONNSESSION -> 500.
+    # Requests beyond the pool wait (pool_timeout) instead of failing.
     pool_size=10,
-    max_overflow=20,
+    max_overflow=5,
+    pool_timeout=30,
 )
 
 async_session_factory = async_sessionmaker(

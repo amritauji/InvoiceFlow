@@ -6,6 +6,7 @@ from supabase import create_client, Client
 from app.config import get_settings
 
 _supabase_admin: Client | None = None
+_supabase_anon: Client | None = None
 _jwks_cache: dict | None = None
 _jwks_cache_time: float = 0
 _JWKS_TTL = 3600  # re-fetch every hour
@@ -21,6 +22,22 @@ def get_supabase_client() -> Client:
             settings.SUPABASE_SERVICE_KEY,
         )
     return _supabase_admin
+
+
+def get_auth_client() -> Client:
+    """Return a Supabase client with the anon key (user-facing auth flows).
+
+    Sign-in/session operations must NOT use the service role key — it is a
+    superuser credential intended for trusted server-side admin calls.
+    """
+    global _supabase_anon
+    if _supabase_anon is None:
+        settings = get_settings()
+        _supabase_anon = create_client(
+            settings.SUPABASE_URL,
+            settings.SUPABASE_ANON_KEY,
+        )
+    return _supabase_anon
 
 
 def _get_jwks() -> dict:
@@ -42,8 +59,12 @@ def _get_signing_key(token: str):
     kid = header.get("kid")
     alg = header.get("alg")
 
-    if not kid or not alg:
-        raise ValueError("Token missing kid or alg in header")
+    if not kid:
+        raise ValueError("Token missing kid in header")
+
+    alg = header.get("alg")
+    if alg not in ALLOWED_ALGORITHMS:
+        raise ValueError(f"Unsupported algorithm: {alg}")
 
     jwks = _get_jwks()
     key_data = next((k for k in jwks.get("keys", []) if k.get("kid") == kid), None)
@@ -54,17 +75,22 @@ def _get_signing_key(token: str):
     return jwk.construct(key_data)
 
 
+ALLOWED_ALGORITHMS = ["ES256"]
+
+
 def decode_jwt_token(token: str) -> dict:
-    """Decode and verify a Supabase JWT token using JWKS."""
+    """Decode and verify a Supabase JWT token using JWKS.
+
+    The algorithm is hardcoded to ES256 to prevent algorithm confusion attacks.
+    The token header is only used to look up the correct signing key (kid).
+    """
     try:
         signing_key = _get_signing_key(token)
-        header = jose_jwt.get_unverified_header(token)
-        alg = header.get("alg", "ES256")
 
         payload = jose_jwt.decode(
             token,
             signing_key,
-            algorithms=[alg],
+            algorithms=ALLOWED_ALGORITHMS,
             audience="authenticated",
         )
         return payload

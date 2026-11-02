@@ -50,6 +50,8 @@ CREATE TABLE invoices (
     invoice_number    VARCHAR(30) NOT NULL UNIQUE,
     vendor_name       VARCHAR(200) NOT NULL,
     amount            NUMERIC(12,2) NOT NULL CHECK (amount > 0),
+    currency          VARCHAR(3) NOT NULL DEFAULT 'INR'
+                        CHECK (currency IN ('INR', 'USD')),
     remarks           TEXT,
     status            VARCHAR(30) NOT NULL DEFAULT 'submitted'
                         CHECK (status IN (
@@ -122,3 +124,24 @@ CREATE TABLE audit_logs (
 );
 
 COMMENT ON TABLE audit_logs IS 'Immutable audit trail. Every system action is logged here.';
+
+-- ============================================================
+-- 7. NOTIFICATIONS
+-- ============================================================
+CREATE TABLE notifications (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id     UUID NOT NULL REFERENCES user_profiles(id) ON DELETE CASCADE,
+    invoice_id  UUID REFERENCES invoices(id) ON DELETE CASCADE,
+    type        VARCHAR(50) NOT NULL,
+    title       VARCHAR(200) NOT NULL,
+    message     TEXT NOT NULL,
+    is_read     BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+COMMENT ON TABLE notifications IS 'In-app notifications for invoice workflow events';
+
+CREATE INDEX idx_notifications_user_id ON notifications(user_id);
+CREATE INDEX idx_notifications_invoice_id ON notifications(invoice_id);
+CREATE INDEX idx_notifications_is_read ON notifications(is_read);
+CREATE INDEX idx_notifications_created_at ON notifications(created_at);

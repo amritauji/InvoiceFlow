@@ -30,6 +30,11 @@ def _set_cached_user(user_id: str, data: dict):
     _user_cache[user_id] = (data, time.time())
 
 
+def invalidate_user_cache(user_id: str):
+    """Remove a user from the in-memory cache. Call after role/status changes."""
+    _user_cache.pop(user_id, None)
+
+
 class UserRole(str, Enum):
     DEPARTMENT_USER = "department_user"
     ACCOUNTANT_1 = "accountant_1"
@@ -55,7 +60,7 @@ class UserContext:
 ROLE_PERMISSIONS: dict[UserRole, set[str]] = {
     UserRole.ADMIN: {
         "invoice:create", "invoice:read_own", "invoice:read_all",
-        "invoice:update_own", "invoice:delete",
+        "invoice:update_own",
         "approval:verify", "approval:approve", "approval:reject",
         "approval:return", "approval:comment",
         "user:manage", "department:manage", "workflow:configure",
@@ -82,17 +87,17 @@ ROLE_PERMISSIONS: dict[UserRole, set[str]] = {
         "audit:read", "dashboard:stats_all", "file:download",
     },
     UserRole.ACCOUNTANT_1: {
-        "invoice:read_all", "invoice:delete", "approval:verify", "approval:approve",
+        "invoice:create", "invoice:read_all", "invoice:delete", "approval:verify", "approval:approve",
         "approval:reject", "approval:return", "approval:comment",
         "audit:read", "dashboard:stats_all", "file:download",
     },
     UserRole.ACCOUNTANT_2: {
-        "invoice:read_all", "approval:verify", "approval:approve",
+        "invoice:create", "invoice:read_all", "approval:verify", "approval:approve",
         "approval:reject", "approval:return", "approval:comment",
         "audit:read", "dashboard:stats_all", "file:download",
     },
     UserRole.DEPARTMENT_USER: {
-        "invoice:create", "invoice:read_own", "invoice:update_own",
+        "invoice:create", "invoice:read_own",
         "file:upload", "file:download", "dashboard:stats_own",
     },
 }

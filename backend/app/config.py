@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings
 from functools import lru_cache
+import warnings
 
 
 class Settings(BaseSettings):
@@ -31,6 +32,23 @@ class Settings(BaseSettings):
     # Max upload size: 10MB
     MAX_UPLOAD_SIZE: int = 10 * 1024 * 1024
 
+    # HTTPS enforcement (set True in production)
+    FORCE_HTTPS: bool = False
+
 
 def get_settings() -> Settings:
-    return Settings()
+    s = Settings()
+    if s.APP_ENV == "production":
+        if not s.CORS_ORIGINS:
+            warnings.warn(
+                "CORS_ORIGINS is empty in production — all origins will be blocked. "
+                "Set CORS_ORIGINS env var to your frontend URL(s).",
+                stacklevel=2,
+            )
+        if s.SECRET_KEY == "change-me-in-production":
+            warnings.warn(
+                "SECRET_KEY is the default value in production. "
+                "Set a strong SECRET_KEY via environment variable.",
+                stacklevel=2,
+            )
+    return s

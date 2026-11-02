@@ -14,7 +14,7 @@ export default function ConfirmBulkApprove({ count, onConfirm, onCancel }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onCancel}>
+    <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center p-4 overflow-y-auto" onClick={onCancel}>
       <div className="absolute inset-0 bg-black/40" />
       <div
         className="relative bg-white dark:bg-[#1e2538] rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4 border border-gray-200 dark:border-[#2e3650] transition-colors"

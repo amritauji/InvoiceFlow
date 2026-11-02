@@ -220,6 +220,7 @@ class ReportService:
                 "invoice_number": inv.invoice_number,
                 "vendor_name": inv.vendor_name,
                 "amount": float(inv.amount),
+                "currency": inv.currency,
                 "status": inv.status,
                 "submitter": submitter_name,
                 "department": dept_name,

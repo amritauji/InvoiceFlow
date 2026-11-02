@@ -5,12 +5,12 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.models.invoice import InvoiceFile
+from app.models.invoice import InvoiceFile, Invoice
 from app.core.security import get_supabase_client
 from app.core.dependencies import UserContext, UserRole
 from app.core.exceptions import NotFoundException, ForbiddenException, BadRequestException
 from app.config import get_settings
-from app.services.invoice_service import resolve_invoice_id
+from app.services.invoice_service import resolve_invoice_id, InvoiceService
 
 settings = get_settings()
 
@@ -20,6 +20,20 @@ class FileService:
 
     ALLOWED_TYPES = {"application/pdf", "image/png", "image/jpeg"}
     MAX_SIZE = 10 * 1024 * 1024  # 10MB
+    PDF_MAGIC = b"%PDF-"
+
+    @staticmethod
+    def validate_pdf_content(file_bytes: bytes) -> None:
+        """Reject files that claim to be PDFs but are not (or are corrupt).
+
+        Checks the PDF header magic bytes and confirms a matching EOF marker
+        exists so downstream parsing (e.g. pypdf) never crashes on junk.
+        """
+        stripped = file_bytes.lstrip()
+        if not stripped.startswith(FileService.PDF_MAGIC):
+            raise BadRequestException("File is not a valid PDF (missing %PDF- header)")
+        if b"%%EOF" not in file_bytes[-2048:]:
+            raise BadRequestException("File is a corrupt or truncated PDF (missing %%EOF marker)")
 
     @staticmethod
     def _get_storage_client():
@@ -48,6 +62,8 @@ class FileService:
             raise BadRequestException(f"File type '{mime_type}' not allowed. Use PDF, PNG, or JPEG.")
         if file_size > FileService.MAX_SIZE:
             raise BadRequestException("File exceeds 10MB limit")
+        if mime_type == "application/pdf":
+            FileService.validate_pdf_content(file_bytes)
 
         # Build storage path
         storage_path = FileService._build_path(invoice_id, file_name, "original")
@@ -93,6 +109,14 @@ class FileService:
         file_record = result.scalar_one_or_none()
         if not file_record:
             raise NotFoundException("File", file_id)
+
+        # Enforce view permission on the file's invoice
+        inv_result = await db.execute(
+            select(Invoice).where(Invoice.id == file_record.invoice_id)
+        )
+        invoice = inv_result.scalar_one_or_none()
+        if invoice:
+            InvoiceService.assert_can_view(actor, invoice)
 
         # Determine bucket based on file type
         if file_record.file_type == "original":

@@ -364,7 +364,7 @@ class PDFService:
     @staticmethod
     def merge_pdfs(original_pdf: bytes, stamp_pdf: bytes) -> bytes:
         """Merge original invoice PDF with approval stamp PDF (append as new page)."""
-        from PyPDF2 import PdfReader, PdfWriter
+        from pypdf import PdfReader, PdfWriter
 
         writer = PdfWriter()
 
@@ -385,7 +385,7 @@ class PDFService:
     @staticmethod
     def overlay_on_original_pdf(original_pdf: bytes, overlay_pdf: bytes) -> bytes:
         """Overlay approval summary directly onto the last page of the original PDF."""
-        from PyPDF2 import PdfReader, PdfWriter
+        from pypdf import PdfReader, PdfWriter
 
         original_reader = PdfReader(BytesIO(original_pdf))
         overlay_reader = PdfReader(BytesIO(overlay_pdf))
@@ -397,6 +397,316 @@ class PDFService:
             if i == len(original_reader.pages) - 1:
                 # Overlay on the last page
                 page.merge_page(overlay_page)
+            writer.add_page(page)
+
+        output = BytesIO()
+        writer.write(output)
+        return output.getvalue()
+
+    @staticmethod
+    def _last_page_content_bottom_pt(page) -> float | None:
+        """Estimate the bottom-most content y (PDF points, origin bottom-left) on a page.
+
+        Text positions come from pypdf's extraction visitor; image placements come
+        from walking the content stream's CTM for ``Do`` image XObjects. Returns
+        ``None`` when nothing can be detected (caller should treat the page as full).
+        """
+        try:
+            operations = page.get_contents().operations
+        except Exception:
+            return None
+
+        page_h_pt = float(page.mediabox.height)
+        lowest_y = page_h_pt
+
+        ctm = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+        stack: list[tuple[float, float, float, float, float, float]] = []
+
+        def mul(m1, m2):
+            a1, b1, c1, d1, e1, f1 = m1
+            a2, b2, c2, d2, e2, f2 = m2
+            return (
+                a1 * a2 + c1 * b2,
+                b1 * a2 + d1 * b2,
+                a1 * c2 + c1 * d2,
+                b1 * c2 + d1 * d2,
+                a1 * e2 + c1 * f2 + e1,
+                b1 * e2 + d1 * f2 + f1,
+            )
+
+        xobjects = {}
+        try:
+            resources = page.get("/Resources")
+            if resources is not None:
+                res = resources.get_object()
+                xo = res.get("/XObject", {})
+                if hasattr(xo, "get_object"):
+                    xo = xo.get_object()
+                for k, v in (xo.items() if isinstance(xo, dict) else []):
+                    try:
+                        xobjects[str(k)] = v.get_object()
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        for operands, operator in operations:
+            try:
+                if operator == b"q":
+                    stack.append(ctm)
+                elif operator == b"Q":
+                    if stack:
+                        ctm = stack.pop()
+                elif operator == b"cm":
+                    ctm = mul(ctm, tuple(float(x) for x in operands[:6]))
+                elif operator == b"Do":
+                    xobj = xobjects.get(str(operands[0]))
+                    if xobj is not None and xobj.get("/Subtype") == "/Image":
+                        lowest_y = min(lowest_y, ctm[5], ctm[5] + ctm[3])
+            except Exception:
+                continue
+
+        def visitor(text, cm, tm, font_dict, font_size):
+            nonlocal lowest_y
+            try:
+                if not text or not text.strip() or not font_size or font_size <= 0:
+                    return
+                baseline = tm[5]
+                descent = font_size * 0.25
+                lowest_y = min(lowest_y, baseline - descent)
+            except Exception:
+                pass
+
+        try:
+            page.extract_text(visitor_text=visitor)
+        except Exception:
+            pass
+
+        if lowest_y >= page_h_pt - 1:
+            return None
+        return max(lowest_y, 0.0)
+
+    @staticmethod
+    def generate_approval_back_page(
+        *,
+        invoice_number: str,
+        vendor_name: str,
+        amount: float,
+        approval_chain: list[dict],
+        submitted_at: str,
+        remarks: str = "",
+        currency: str = "INR",
+    ) -> bytes:
+        """Generate a full-page approval stamp to embed on the back page."""
+        from fpdf import FPDF
+
+        pdf = FPDF(orientation="P", unit="mm", format="A4")
+        pdf.set_auto_page_break(auto=True, margin=15)
+        pdf.add_page()
+
+        # Big APPROVED stamp
+        pdf.set_font("Helvetica", "B", 42)
+        pdf.set_text_color(46, 204, 113)
+        pdf.set_draw_color(46, 204, 113)
+        pdf.set_line_width(2)
+        pdf.rect(35, 25, 140, 40, style="D")
+        pdf.set_xy(35, 30)
+        pdf.cell(140, 30, "APPROVED", align="C")
+
+        # Invoice meta
+        pdf.set_font("Helvetica", "", 11)
+        pdf.set_text_color(60, 60, 60)
+        pdf.set_xy(20, 80)
+        pdf.cell(0, 8, f"Invoice: {invoice_number}", align="C", new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(0, 8, f"Vendor: {vendor_name}", align="C", new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(0, 8, f"Amount: {currency} {amount:,.2f}", align="C", new_x="LMARGIN", new_y="NEXT")
+        pdf.ln(6)
+
+        pdf.set_draw_color(67, 97, 238)
+        pdf.set_line_width(0.4)
+        pdf.line(20, pdf.get_y(), 190, pdf.get_y())
+        pdf.ln(6)
+
+        # Approval summary
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.set_text_color(67, 97, 238)
+        pdf.cell(0, 7, "APPROVAL SUMMARY", align="C", new_x="LMARGIN", new_y="NEXT")
+        pdf.ln(3)
+
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(60, 60, 60)
+        pdf.cell(20, 7, "Stage", new_x="END")
+        pdf.cell(55, 7, "Approved By", new_x="END")
+        pdf.cell(60, 7, "Role", new_x="END")
+        pdf.cell(0, 7, "Date", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_draw_color(200, 200, 200)
+        pdf.line(20, pdf.get_y(), 190, pdf.get_y())
+        pdf.ln(2)
+
+        pdf.set_font("Helvetica", "", 9)
+        pdf.set_text_color(40, 40, 40)
+        for entry in approval_chain:
+            pdf.cell(20, 7, entry.get("stage_name", ""), new_x="END")
+            pdf.cell(55, 7, entry.get("actor_name", "-"), new_x="END")
+            pdf.cell(60, 7, entry.get("role", ""), new_x="END")
+            pdf.cell(0, 7, entry.get("acted_at", ""), new_x="LMARGIN", new_y="NEXT")
+
+        if remarks:
+            pdf.ln(4)
+            pdf.set_font("Helvetica", "I", 8)
+            pdf.set_text_color(120, 120, 120)
+            pdf.multi_cell(0, 5, f"Remarks: {remarks}")
+
+        pdf.ln(8)
+        pdf.set_font("Helvetica", "", 8)
+        pdf.set_text_color(120, 120, 120)
+        pdf.cell(0, 5, f"Submitted: {submitted_at}", align="C")
+
+        return bytes(pdf.output())
+
+    @staticmethod
+    def build_approved_pdf(
+        *,
+        original_bytes: bytes,
+        invoice_number: str,
+        vendor_name: str,
+        amount: float,
+        approval_chain: list[dict],
+        submitted_at: str,
+        remarks: str = "",
+        currency: str = "INR",
+    ) -> bytes:
+        """Produce the approved invoice PDF with a space-aware CEO approval stamp.
+
+        Stamp placement logic:
+          - If the last content page has enough free space below the content (and
+            before the page ends), the approval summary is stamped on that page.
+          - Otherwise it is stamped on a new back page so invoice content is never
+            covered.
+        """
+        from pypdf import PdfReader
+        from pypdf.errors import PyPdfError
+        from app.core.exceptions import BadRequestException
+
+        try:
+            reader = PdfReader(BytesIO(original_bytes))
+        except PyPdfError as exc:
+            raise BadRequestException(f"Original file is a corrupt or invalid PDF: {exc}") from exc
+        if not reader.pages:
+            return original_bytes
+
+        last_page = reader.pages[-1]
+        page_w_mm = float(last_page.mediabox.width) * 25.4 / 72
+        page_h_mm = float(last_page.mediabox.height) * 25.4 / 72
+
+        bar_height_mm = 48 + len(approval_chain) * 7
+        stamp_region_mm = bar_height_mm + 12  # 10mm bottom margin + 2mm clearance
+
+        content_bottom_pt = PDFService._last_page_content_bottom_pt(last_page)
+        free_space_mm = (
+            content_bottom_pt * 25.4 / 72 if content_bottom_pt is not None else None
+        )
+
+        if free_space_mm is not None and free_space_mm >= stamp_region_mm:
+            # Space available below the content -> stamp on the same page
+            overlay_bytes = PDFService.generate_approval_overlay_pdf(
+                page_width=page_w_mm,
+                page_height=page_h_mm,
+                invoice_number=invoice_number,
+                approval_chain=approval_chain,
+                submitted_at=submitted_at,
+                remarks=remarks,
+            )
+            return PDFService.overlay_on_original_pdf(original_bytes, overlay_bytes)
+
+        # No space on the content page -> stamp on the back page
+        back_page_bytes = PDFService.generate_approval_back_page(
+            invoice_number=invoice_number,
+            vendor_name=vendor_name,
+            amount=amount,
+            approval_chain=approval_chain,
+            submitted_at=submitted_at,
+            remarks=remarks,
+            currency=currency,
+        )
+        return PDFService.merge_pdfs(original_bytes, back_page_bytes)
+
+    @staticmethod
+    def image_to_pdf(image_bytes: bytes, mime_type: str) -> bytes:
+        """Convert an image (PNG/JPEG) into a single-page A4 PDF."""
+        from PIL import Image
+
+        img = Image.open(BytesIO(image_bytes))
+        img_w, img_h = img.size
+
+        page_w_mm = 210.0
+        page_h_mm = 297.0
+        margin = 10.0
+        avail_w = page_w_mm - 2 * margin
+        avail_h = page_h_mm - 2 * margin
+
+        # Assume 150 DPI for the physical size, then scale to fit the page
+        dpi = 150.0
+        w_mm = img_w / dpi * 25.4
+        h_mm = img_h / dpi * 25.4
+        scale = min(avail_w / w_mm, avail_h / h_mm, 1.0)
+        w_mm *= scale
+        h_mm *= scale
+        x = (page_w_mm - w_mm) / 2
+        y = (page_h_mm - h_mm) / 2
+
+        from fpdf import FPDF
+
+        pdf = FPDF(orientation="P", unit="mm", format="A4")
+        pdf.set_auto_page_break(auto=False)
+        pdf.add_page()
+        pdf.image(BytesIO(image_bytes), x=x, y=y, w=w_mm, h=h_mm)
+        return bytes(pdf.output())
+
+    @staticmethod
+    def create_narration_page(narration: str, page_width_mm: float = 210, page_height_mm: float = 80) -> bytes:
+        """Create a small page containing only the narration/remark text."""
+        pdf = FPDF(orientation="P", unit="mm", format=(page_width_mm, page_height_mm))
+        pdf.set_auto_page_break(auto=False)
+        pdf.add_page()
+
+        # Thin top border line
+        pdf.set_draw_color(200, 200, 200)
+        pdf.set_line_width(0.3)
+        pdf.line(10, 5, page_width_mm - 10, 5)
+
+        # Label
+        pdf.set_xy(10, 8)
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.set_text_color(120, 120, 120)
+        pdf.cell(0, 5, "NARRATION", new_x="LMARGIN", new_y="NEXT")
+
+        # Narration text
+        pdf.set_xy(10, 15)
+        pdf.set_font("Helvetica", "", 9)
+        pdf.set_text_color(40, 40, 40)
+        pdf.multi_cell(page_width_mm - 20, 5, narration)
+
+        return bytes(pdf.output())
+
+    @staticmethod
+    def append_narration_to_pdf(original_pdf: bytes, narration: str) -> bytes:
+        """Append a small narration page after the last page of the original PDF."""
+        from pypdf import PdfReader, PdfWriter
+
+        # Create the narration page
+        narration_bytes = PDFService.create_narration_page(narration)
+
+        writer = PdfWriter()
+
+        # Add all original pages
+        original_reader = PdfReader(BytesIO(original_pdf))
+        for page in original_reader.pages:
+            writer.add_page(page)
+
+        # Add narration page
+        narration_reader = PdfReader(BytesIO(narration_bytes))
+        for page in narration_reader.pages:
             writer.add_page(page)
 
         output = BytesIO()

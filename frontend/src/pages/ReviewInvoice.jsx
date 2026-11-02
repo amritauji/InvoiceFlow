@@ -2,6 +2,11 @@ import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import usePolling from '../hooks/usePolling';
+import { useAuth } from '../context/AuthContext';
+import { formatCurrency } from '../utils/currency';
+import { getErrorMessage } from '../utils/error';
+import PdfViewer from '../components/PdfViewer';
+import useMediaQuery from '../hooks/useMediaQuery';
 
 const statusColors = {
   submitted: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
@@ -30,6 +35,8 @@ const workflowStages = [
 export default function ReviewInvoice() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const isMobile = useMediaQuery('(max-width: 767px)');
   const [invoice, setInvoice] = useState(null);
   const [history, setHistory] = useState([]);
   const [comment, setComment] = useState('');
@@ -40,6 +47,14 @@ export default function ReviewInvoice() {
   const [signedUrls, setSignedUrls] = useState({});
   const [activeFileIdx, setActiveFileIdx] = useState(0);
   const [urlLoading, setUrlLoading] = useState(true);
+
+  const [rsVendor, setRsVendor] = useState('');
+  const [rsAmount, setRsAmount] = useState('');
+  const [rsCurrency, setRsCurrency] = useState('INR');
+  const [rsRemarks, setRsRemarks] = useState('');
+  const [rsFile, setRsFile] = useState(null);
+  const [rsDragging, setRsDragging] = useState(false);
+  const [resubmitting, setResubmitting] = useState(false);
 
   const fetchInvoice = useCallback(async () => {
     try {
@@ -83,6 +98,47 @@ export default function ReviewInvoice() {
     }
   }, 15000);
 
+  useEffect(() => {
+    if (invoice) {
+      setRsVendor(invoice.vendor_name || '');
+      setRsAmount(invoice.amount != null ? String(invoice.amount) : '');
+      setRsCurrency(invoice.currency || 'INR');
+      setRsRemarks(invoice.remarks || '');
+      setRsFile(null);
+    }
+  }, [invoice?.id, invoice?.version]);
+
+  const handleResubmit = async (e) => {
+    e.preventDefault();
+    if (resubmitting) return;
+    if (!rsAmount || Number(rsAmount) <= 0) {
+      setToast({ type: 'error', message: 'Amount must be greater than zero.' });
+      setTimeout(() => setToast(null), 5000);
+      return;
+    }
+    setResubmitting(true);
+    try {
+      const formData = new FormData();
+      formData.append('vendor_name', rsVendor);
+      formData.append('amount', rsAmount);
+      formData.append('currency', rsCurrency);
+      formData.append('remarks', rsRemarks || '');
+      if (rsFile) formData.append('file', rsFile);
+      await api.post(`/invoices/${id}/resubmit`, formData);
+      setToast({ type: 'success', message: 'Invoice resubmitted for a new review cycle.' });
+      setTimeout(() => setToast(null), 5000);
+      await fetchInvoice();
+    } catch (err) {
+      setToast({
+        type: 'error',
+        message: getErrorMessage(err, 'Failed to resubmit invoice.'),
+      });
+      setTimeout(() => setToast(null), 5000);
+    } finally {
+      setResubmitting(false);
+    }
+  };
+
   const handleAction = async (action) => {
     if (acting) return;
     setActing(true);
@@ -109,7 +165,7 @@ export default function ReviewInvoice() {
     } catch (err) {
       setToast({
         type: 'error',
-        message: err.response?.data?.error?.message || err.response?.data?.detail || `Failed to ${action}`,
+        message: getErrorMessage(err, `Failed to ${action}`),
       });
       setTimeout(() => setToast(null), 5000);
     } finally {
@@ -138,9 +194,18 @@ export default function ReviewInvoice() {
   const currentFile = files[activeFileIdx] || null;
   const currentUrl = currentFile ? signedUrls[currentFile.id] : null;
   const isTerminal = invoice.status === 'approved' || invoice.status === 'rejected' || invoice.status === 'returned';
+  const activeStageRole =
+    invoice.status === 'submitted'
+      ? workflowStages[0].role
+      : invoice.status === 'under_review' && stageIndex >= 0 && stageIndex < workflowStages.length
+        ? workflowStages[stageIndex].role
+        : null;
+  const canAct = user?.role === 'admin' || (!!activeStageRole && user?.role === activeStageRole);
+  const canResubmit = invoice.status === 'returned' && (invoice.submitted_by === user?.id || user?.role === 'admin');
+  const canPrint = ['admin', 'accountant_1'].includes(user?.role);
 
   return (
-    <div className="h-[calc(100vh-4rem)] flex flex-col lg:flex-row gap-4 p-4 lg:p-6 min-h-0 relative dark:bg-[#0b1326]">
+    <div className="flex flex-col lg:flex-row gap-4 p-4 lg:p-6 lg:h-[calc(100vh-4rem)] min-h-0 relative dark:bg-[#0b1326]">
       {/* Toast notification */}
       {toast && (
         <div className={`absolute top-4 left-1/2 -translate-x-1/2 z-50 px-5 py-3 rounded-xl shadow-lg border text-sm font-medium flex items-center gap-2 max-w-lg transition-all ${
@@ -155,7 +220,7 @@ export default function ReviewInvoice() {
         </div>
       )}
       {/* LEFT PANEL — Document Preview */}
-      <div className="flex-1 flex flex-col bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden min-h-0 min-w-0 dark:bg-[#1e2538] dark:border-[#2e3650]">
+      <div className="h-[45vh] lg:h-auto flex-1 flex flex-col bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden min-h-0 min-w-0 dark:bg-[#1e2538] dark:border-[#2e3650]">
         {/* Toolbar */}
         <div className="h-11 border-b border-gray-100 bg-gray-50/80 flex items-center justify-between px-4 shrink-0 dark:bg-[#1e2538] dark:border-[#2e3650]">
           <div className="flex items-center gap-2 min-w-0">
@@ -211,11 +276,15 @@ export default function ReviewInvoice() {
             </div>
           ) : currentUrl ? (
             currentFile?.mime_type === 'application/pdf' ? (
-              <iframe
-                src={currentUrl}
-                className="w-full h-full border-0"
-                title={currentFile.file_name}
-              />
+              isMobile ? (
+                <PdfViewer url={currentUrl} fileName={currentFile.file_name} />
+              ) : (
+                <iframe
+                  src={currentUrl}
+                  className="w-full h-full border-0"
+                  title={currentFile.file_name}
+                />
+              )
             ) : (
               <div className="w-full h-full overflow-auto flex items-start justify-center p-4">
                 <img
@@ -240,7 +309,7 @@ export default function ReviewInvoice() {
       </div>
 
       {/* RIGHT PANEL — Details, Actions, Workflow */}
-      <div className="w-full lg:w-[380px] flex flex-col gap-4 overflow-y-auto shrink-0">
+      <div className="w-full lg:w-[380px] flex flex-col gap-4 lg:overflow-y-auto shrink-0">
         {/* Invoice Summary */}
         <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-5 dark:bg-[#1e2538] dark:border-[#2e3650]">
           <div className="flex items-start justify-between mb-4">
@@ -257,7 +326,7 @@ export default function ReviewInvoice() {
             <div>
               <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider dark:text-[#8d95b0]">Amount</p>
               <p className="text-lg font-bold text-gray-900 mt-0.5 dark:text-[#e1e3f0]">
-                INR {Number(invoice.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                {formatCurrency(invoice.amount, invoice.currency)}
               </p>
             </div>
             <div>
@@ -285,7 +354,7 @@ export default function ReviewInvoice() {
         </div>
 
         {/* Action Panel */}
-        {!isTerminal && (
+        {!isTerminal && canAct && (
           <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-5 dark:bg-[#1e2538] dark:border-[#2e3650]">
             <h3 className="text-xs font-semibold text-gray-900 uppercase tracking-wider mb-3 dark:text-[#e1e3f0]">Your Decision</h3>
             <textarea
@@ -332,13 +401,15 @@ export default function ReviewInvoice() {
               <p className="text-sm font-semibold text-emerald-800 dark:text-emerald-300">Invoice Approved</p>
               <p className="text-xs text-emerald-600 dark:text-emerald-400">This invoice has been fully approved and is final.</p>
             </div>
-            <button
-              onClick={() => navigate(`/invoices/${invoice.invoice_number || invoice.id}/print`)}
-              className="flex items-center gap-1.5 px-3 py-2 bg-white border border-emerald-300 text-emerald-700 rounded-lg text-xs font-medium hover:bg-emerald-100 transition-colors dark:bg-[#1e2538] dark:border-emerald-800 dark:text-emerald-400 dark:hover:bg-[#2e3650]"
-            >
-              <span className="material-symbols-outlined text-[16px]">print</span>
-              Print
-            </button>
+            {canPrint && (
+              <button
+                onClick={() => navigate(`/invoices/${invoice.invoice_number || invoice.id}/print`)}
+                className="flex items-center gap-1.5 px-3 py-2 bg-white border border-emerald-300 text-emerald-700 rounded-lg text-xs font-medium hover:bg-emerald-100 transition-colors dark:bg-[#1e2538] dark:border-emerald-800 dark:text-emerald-400 dark:hover:bg-[#2e3650]"
+              >
+                <span className="material-symbols-outlined text-[16px]">print</span>
+                Print
+              </button>
+            )}
           </div>
         )}
 
@@ -359,6 +430,118 @@ export default function ReviewInvoice() {
               <p className="text-sm font-semibold text-orange-800 dark:text-orange-300">Invoice Returned</p>
               <p className="text-xs text-orange-600 dark:text-orange-400">This invoice has been returned to the submitter for corrections.</p>
             </div>
+          </div>
+        )}
+
+        {invoice.status === 'returned' && canResubmit && (
+          <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-5 dark:bg-[#1e2538] dark:border-[#2e3650]">
+            <h3 className="text-xs font-semibold text-gray-900 uppercase tracking-wider mb-1 dark:text-[#e1e3f0]">Resubmit Invoice</h3>
+            <p className="text-xs text-gray-500 mb-4 dark:text-[#8d95b0]">Correct the details below and resubmit for a fresh review cycle.</p>
+            <form onSubmit={handleResubmit} className="space-y-3">
+              <div>
+                <label className="block text-[11px] font-semibold text-gray-500 dark:text-[#8d95b0] uppercase tracking-wider mb-1.5" htmlFor="rsVendor">Vendor Name *</label>
+                <input
+                  className="w-full h-9 px-3 rounded-lg border border-gray-200 dark:border-[#2e3650] text-sm text-gray-900 dark:text-[#e1e3f0] dark:bg-[#242c42] focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-colors"
+                  id="rsVendor"
+                  required
+                  type="text"
+                  value={rsVendor}
+                  onChange={(e) => setRsVendor(e.target.value)}
+                />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-500 dark:text-[#8d95b0] uppercase tracking-wider mb-1.5" htmlFor="rsAmount">Total Amount *</label>
+                  <input
+                    className="w-full h-9 px-3 rounded-lg border border-gray-200 dark:border-[#2e3650] text-sm text-gray-900 dark:text-[#e1e3f0] dark:bg-[#242c42] focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-colors"
+                    id="rsAmount"
+                    min="0"
+                    required
+                    step="0.01"
+                    type="number"
+                    value={rsAmount}
+                    onChange={(e) => setRsAmount(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-500 dark:text-[#8d95b0] uppercase tracking-wider mb-1.5" htmlFor="rsCurrency">Currency</label>
+                  <select
+                    className="w-full h-9 px-3 rounded-lg border border-gray-200 dark:border-[#2e3650] text-sm text-gray-900 dark:text-[#e1e3f0] dark:bg-[#242c42] focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-colors"
+                    id="rsCurrency"
+                    value={rsCurrency}
+                    onChange={(e) => setRsCurrency(e.target.value)}
+                  >
+                    <option value="INR">INR - Indian Rupee</option>
+                    <option value="USD">USD - US Dollar</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block text-[11px] font-semibold text-gray-500 dark:text-[#8d95b0] uppercase tracking-wider mb-1.5" htmlFor="rsRemarks">Remarks</label>
+                <textarea
+                  className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-[#2e3650] text-sm text-gray-900 dark:text-[#e1e3f0] dark:bg-[#242c42] focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-colors resize-none"
+                  id="rsRemarks"
+                  rows="2"
+                  value={rsRemarks}
+                  onChange={(e) => setRsRemarks(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-semibold text-gray-500 dark:text-[#8d95b0] uppercase tracking-wider mb-1.5">Replace Document (optional)</label>
+                <div
+                  className={`border-2 border-dashed rounded-lg p-4 flex flex-col items-center justify-center text-center cursor-pointer transition-colors dark:bg-[#242c42] ${rsDragging ? 'border-indigo-500 bg-indigo-50/50' : 'border-gray-200 dark:border-[#2e3650] hover:border-gray-300 dark:hover:border-[#3a4560] hover:bg-gray-50 dark:hover:bg-[#2a324a]'}`}
+                  onDragEnter={(e) => { e.preventDefault(); setRsDragging(true); }}
+                  onDragLeave={(e) => { e.preventDefault(); setRsDragging(false); }}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setRsDragging(false);
+                    if (e.dataTransfer.files.length > 0) setRsFile(e.dataTransfer.files[0]);
+                  }}
+                  onClick={() => !rsFile && document.getElementById('rsFileInput').click()}
+                >
+                  <input
+                    accept=".pdf,image/png,image/jpeg"
+                    className="hidden"
+                    id="rsFileInput"
+                    type="file"
+                    onChange={(e) => e.target.files.length > 0 && setRsFile(e.target.files[0])}
+                  />
+                  {rsFile ? (
+                    <div className="w-full flex items-center justify-between">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="material-symbols-outlined text-[20px] text-rose-500">picture_as_pdf</span>
+                        <p className="text-xs font-medium text-gray-900 dark:text-[#e1e3f0] truncate">{rsFile.name}</p>
+                      </div>
+                      <button
+                        className="p-1 rounded-md text-gray-400 hover:text-rose-500 transition-colors shrink-0"
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); setRsFile(null); }}
+                      >
+                        <span className="material-symbols-outlined text-[16px]">close</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <span className="material-symbols-outlined text-[24px] text-gray-300 dark:text-[#8d95b0] mb-1">cloud_upload</span>
+                      <p className="text-xs font-medium text-gray-700 dark:text-[#e1e3f0]">Click to attach a corrected document</p>
+                      <p className="text-[10px] text-gray-400 dark:text-[#8d95b0]">PDF, JPG, PNG up to 10MB</p>
+                    </>
+                  )}
+                </div>
+              </div>
+              <button
+                disabled={resubmitting}
+                type="submit"
+                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2 text-sm disabled:opacity-60"
+              >
+                {resubmitting ? (
+                  <><span className="material-symbols-outlined animate-spin text-[16px]">progress_activity</span>Resubmitting...</>
+                ) : (
+                  <><span className="material-symbols-outlined text-[16px]">send</span>Resubmit Invoice</>
+                )}
+              </button>
+            </form>
           </div>
         )}
 

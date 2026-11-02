@@ -96,11 +96,12 @@ def get_next_approver_info(current_stage_order: int | None, invoice_status: str)
     return None
 
 
-def validate_approval(actor_role: UserRole, invoice_status: str, invoice_stage_order: int | None) -> dict:
+def validate_approval(actor_role: UserRole, invoice_status: str, invoice_stage_order: int | None, is_statement_invoice: bool = False) -> dict:
     """
     Validate whether the actor can approve and determine the outcome.
     Returns the new status and stage info.
-    Admin users can act at any stage.
+    Admin users can act at any stage (superuser bypass).
+    Statement invoices: accountant_1 approval goes directly to approved (single step).
     Only forward progression is allowed — no return/reject.
     """
     if invoice_status in ("approved", "rejected", "returned"):
@@ -112,6 +113,14 @@ def validate_approval(actor_role: UserRole, invoice_status: str, invoice_stage_o
     if invoice_status == "submitted":
         if actor_role not in (UserRole.ACCOUNTANT_1, UserRole.ADMIN):
             raise ForbiddenException("Only Accountant 1 (or Admin) can verify newly submitted invoices")
+        # Statement invoices: single-step approval → go directly to approved
+        if is_statement_invoice:
+            return {
+                "new_status": "approved",
+                "new_stage_order": None,
+                "new_stage_name": None,
+                "is_final": True,
+            }
         stage_order = 1
     elif invoice_status == "under_review":
         if invoice_stage_order is None:

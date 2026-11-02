@@ -44,19 +44,24 @@ class DashboardService:
 
         total = sum(status_counts.values())
 
-        # Amount totals by status
+        # Amount totals by status, grouped by currency (mixed INR/USD must not be summed together)
         amount_query = select(
             Invoice.status,
+            Invoice.currency,
             func.sum(Invoice.amount).label("total_amount"),
         )
         for f in base_filter:
             amount_query = amount_query.where(f)
-        amount_query = amount_query.group_by(Invoice.status)
+        amount_query = amount_query.group_by(Invoice.status, Invoice.currency)
 
         result = await db.execute(amount_query)
-        amount_by_status = {row.status: float(row.total_amount or 0) for row in result.all()}
+        amount_by_status: dict[str, dict[str, float]] = {}
+        for row in result.all():
+            amount_by_status.setdefault(row.status, {})[row.currency] = float(row.total_amount or 0)
 
-        total_amount = sum(amount_by_status.values())
+        total_amount = sum(
+            amt for per_status in amount_by_status.values() for amt in per_status.values()
+        )
 
         # Department breakdown (only for non-department-user roles)
         dept_breakdown = []
@@ -84,8 +89,7 @@ class DashboardService:
                 for row in result.all()
             ]
 
-        # Recent activity (last 7 days)
-        seven_days_ago = datetime.utcnow() - timedelta(days=7)
+        # Recent activity (latest invoices, no time cutoff so sparse data still shows)
         recent_query = select(
             Invoice.invoice_number,
             Invoice.vendor_name,
@@ -99,7 +103,6 @@ class DashboardService:
         recent_query = (
             recent_query
             .join(UserProfile, Invoice.submitted_by == UserProfile.id)
-            .where(Invoice.created_at >= seven_days_ago)
             .order_by(Invoice.created_at.desc())
             .limit(10)
         )

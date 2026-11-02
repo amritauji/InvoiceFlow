@@ -2,10 +2,11 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging
+from sqlalchemy.exc import IntegrityError
 
 from app.config import get_settings
 from app.core.exceptions import AppException
-from app.core.middleware import app_exception_handler, generic_exception_handler
+from app.core.middleware import app_exception_handler, generic_exception_handler, integrity_exception_handler, RateLimitMiddleware, HTTPSRedirectMiddleware
 
 settings = get_settings()
 logger = logging.getLogger("app.middleware")
@@ -26,7 +27,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS
+# CORS — in production, CORS_ORIGINS must be set explicitly via env var
 _cors_origins = (
     [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
     if settings.CORS_ORIGINS
@@ -42,9 +43,16 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
+    allow_headers=["Authorization", "Content-Type"],
 )
+
+# Rate limiter
+app.add_middleware(RateLimitMiddleware)
+
+# HTTPS enforcement (production only)
+if settings.FORCE_HTTPS:
+    app.add_middleware(HTTPSRedirectMiddleware)
 
 
 @app.middleware("http")
@@ -58,6 +66,7 @@ async def log_auth_header(request: Request, call_next):
 
 # Exception handlers
 app.add_exception_handler(AppException, app_exception_handler)
+app.add_exception_handler(IntegrityError, integrity_exception_handler)
 app.add_exception_handler(Exception, generic_exception_handler)
 
 # Register routes
@@ -67,6 +76,8 @@ from app.routes.invoices import router as invoices_router
 from app.routes.approvals import router as approvals_router
 from app.routes.audit import router as audit_router
 from app.routes.dashboard import router as dashboard_router
+from app.routes.notifications import router as notifications_router
+from app.routes.statements import router as statements_router
 
 app.include_router(auth_router, prefix=settings.API_V1_PREFIX)
 app.include_router(admin_router, prefix=settings.API_V1_PREFIX)
@@ -74,6 +85,8 @@ app.include_router(invoices_router, prefix=settings.API_V1_PREFIX)
 app.include_router(approvals_router, prefix=settings.API_V1_PREFIX)
 app.include_router(audit_router, prefix=settings.API_V1_PREFIX)
 app.include_router(dashboard_router, prefix=settings.API_V1_PREFIX)
+app.include_router(notifications_router, prefix=settings.API_V1_PREFIX)
+app.include_router(statements_router, prefix=settings.API_V1_PREFIX)
 
 
 @app.get("/health")

@@ -3,9 +3,12 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.schemas import UserCreate, UserUpdate, UserResponse, DepartmentCreate, DepartmentUpdate, DepartmentResponse
+from app.schemas import UserCreate, UserUpdate, DepartmentCreate, DepartmentUpdate
 from app.services.auth_service import AuthService
-from app.core.dependencies import get_current_user, require_role, UserContext, UserRole
+from app.core.dependencies import (
+    get_current_user, require_role, invalidate_user_cache,
+    UserContext, UserRole, ROLE_PERMISSIONS,
+)
 from app.models.department import Department
 from sqlalchemy import select
 import uuid
@@ -219,11 +222,15 @@ async def update_user(
     profile = await AuthService.update_user(
         db, user_id,
         full_name=body.full_name,
+        email=body.email,
+        password=body.password,
         role=body.role,
         department_id=body.department_id,
         phone=body.phone,
         is_active=body.is_active,
     )
+
+    invalidate_user_cache(user_id)
 
     return {
         "success": True,
@@ -236,3 +243,71 @@ async def update_user(
             "is_active": profile.is_active,
         },
     }
+
+
+@router.delete("/users/{user_id}")
+async def delete_user(
+    user_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: UserContext = Depends(require_role(UserRole.ADMIN)),
+):
+    if current_user.id == user_id:
+        from app.core.exceptions import BadRequestException
+        raise BadRequestException("Cannot delete your own account")
+
+    result = await AuthService.delete_user(db, user_id)
+    invalidate_user_cache(user_id)
+    return {"success": True, "message": result["message"]}
+
+
+# --- Roles & Permissions Endpoint ---
+
+ROLE_LABELS = {
+    "admin": "Admin",
+    "accounts_team": "Accounts Team",
+    "accounts_head": "Accounts Head",
+    "ceo": "CEO",
+    "manager": "Manager",
+    "accountant_1": "Accountant 1",
+    "accountant_2": "Accountant 2",
+    "department_user": "Department User",
+}
+
+PERMISSION_LABELS = {
+    "invoice:create": "Create Invoices",
+    "invoice:read_own": "View Own Invoices",
+    "invoice:read_all": "View All Invoices",
+    "invoice:update_own": "Update Own Invoices",
+    "invoice:delete": "Delete Invoices",
+    "approval:verify": "Verify Invoices",
+    "approval:approve": "Approve Invoices",
+    "approval:reject": "Reject Invoices",
+    "approval:return": "Return Invoices",
+    "approval:comment": "Comment on Invoices",
+    "user:manage": "Manage Users",
+    "department:manage": "Manage Departments",
+    "workflow:configure": "Configure Workflow",
+    "audit:read": "View Audit Trail",
+    "dashboard:stats_all": "View All Dashboard Stats",
+    "dashboard:stats_own": "View Own Dashboard Stats",
+    "file:upload": "Upload Files",
+    "file:download": "Download Files",
+}
+
+
+@router.get("/roles")
+async def list_roles(
+    current_user: UserContext = Depends(require_role(UserRole.ADMIN)),
+):
+    roles = []
+    for role_enum in UserRole:
+        perms = ROLE_PERMISSIONS.get(role_enum, set())
+        roles.append({
+            "value": role_enum.value,
+            "label": ROLE_LABELS.get(role_enum.value, role_enum.value),
+            "permissions": [
+                {"key": p, "label": PERMISSION_LABELS.get(p, p)}
+                for p in sorted(perms)
+            ],
+        })
+    return {"success": True, "data": roles}

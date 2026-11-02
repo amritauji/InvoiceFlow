@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
-import logo from '../assets/logo.png';
+import api from '../services/api';
+import logo from '../assets/logo.webp';
 
 const navSections = [
   {
@@ -15,8 +16,15 @@ const navSections = [
     label: 'Invoices',
     items: [
       { label: 'Approval Queue', icon: 'rule', to: '/approvals', roles: ['admin','accountant_1','accountant_2','manager','ceo'] },
-      { label: 'Submit Invoice', icon: 'add_circle', to: '/invoices/new', roles: ['admin','department_user'] },
+      { label: 'Submit Invoice', icon: 'add_circle', to: '/invoices/new', roles: ['admin','department_user','accountant_1','accountant_2'] },
       { label: 'My Submissions', icon: 'send_and_archive', to: '/invoices' },
+    ],
+  },
+  {
+    label: 'Statements',
+    items: [
+      { label: 'All Statements', icon: 'receipt_long', to: '/statements' },
+      { label: 'Submit Statement', icon: 'upload_file', to: '/statements/new', roles: ['accountant_1'] },
     ],
   },
   {
@@ -88,7 +96,7 @@ function Layout() {
             <button className="lg:hidden p-2 -ml-2 rounded-lg text-gray-500 dark:text-[#8d95b0] hover:bg-gray-100 dark:hover:bg-[#1e2538] hover:text-gray-700 dark:hover:text-[#e1e3f0] transition-colors shrink-0" onClick={() => setSidebarOpen(true)}>
               <span className="material-symbols-outlined text-[22px]">menu</span>
             </button>
-            <form onSubmit={handleSearch} className="w-64 min-w-0">
+            <form onSubmit={handleSearch} className="flex-1 min-w-0 max-w-[200px] lg:max-w-none lg:w-64">
               <div className="relative">
                 <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[18px] text-gray-400 dark:text-[#8d95b0] pointer-events-none">search</span>
                 <input
@@ -109,9 +117,7 @@ function Layout() {
             >
               <span className="material-symbols-outlined text-[22px]">{dark ? 'light_mode' : 'dark_mode'}</span>
             </button>
-            <button className="p-2 rounded-lg text-gray-500 dark:text-[#8d95b0] hover:bg-gray-100 dark:hover:bg-[#1e2538] hover:text-gray-700 dark:hover:text-[#e1e3f0] transition-colors">
-              <span className="material-symbols-outlined text-[22px]">notifications</span>
-            </button>
+            <NotificationBell />
             <div className="w-px h-6 bg-gray-200 dark:bg-[#2e3650] mx-1" />
             <div className="flex items-center gap-2 pl-1">
               <div className="w-8 h-8 rounded-full bg-indigo-100 dark:bg-indigo-900/50 flex items-center justify-center text-indigo-700 dark:text-indigo-400 text-xs font-bold shrink-0">{initials}</div>
@@ -182,6 +188,137 @@ function SidebarContent({ onClose, user, onLogout }) {
         </button>
       </div>
     </>
+  );
+}
+
+function timeAgo(iso) {
+  if (!iso) return '';
+  const then = new Date(iso);
+  const seconds = Math.max(0, Math.floor((Date.now() - then.getTime()) / 1000));
+  if (seconds < 60) return 'just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return then.toLocaleDateString();
+}
+
+function NotificationBell() {
+  const [open, setOpen] = useState(false);
+  const [items, setItems] = useState([]);
+  const [unread, setUnread] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const ref = useRef(null);
+  const navigate = useNavigate();
+
+  const fetchNotifications = async () => {
+    try {
+      const { data } = await api.get('/notifications', { params: { limit: 15 } });
+      setItems(data.data || []);
+      setUnread(data.meta?.unread ?? 0);
+    } catch {
+      // ignore — bell stays silent on errors
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchNotifications();
+    const interval = setInterval(fetchNotifications, 30000);
+    const onDocClick = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('mousedown', onDocClick);
+    };
+  }, []);
+
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    if (next) fetchNotifications();
+  };
+
+  const handleClick = async (n) => {
+    if (!n.is_read) {
+      setUnread((u) => Math.max(0, u - 1));
+      setItems((prev) => prev.map((x) => (x.id === n.id ? { ...x, is_read: true } : x)));
+      try { await api.patch(`/notifications/${n.id}/read`); } catch { /* noop */ }
+    }
+    setOpen(false);
+    if (n.invoice_id) navigate(`/invoices/${n.invoice_id}`);
+  };
+
+  const markAll = async () => {
+    try { await api.patch('/notifications/read-all'); } catch { /* noop */ }
+    setItems((prev) => prev.map((x) => ({ ...x, is_read: true })));
+    setUnread(0);
+  };
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={toggle}
+        className="relative p-2 rounded-lg text-gray-500 dark:text-[#8d95b0] hover:bg-gray-100 dark:hover:bg-[#1e2538] hover:text-gray-700 dark:hover:text-[#e1e3f0] transition-colors"
+        aria-label={`Notifications${unread ? ` (${unread} unread)` : ''}`}
+      >
+        <span className="material-symbols-outlined text-[22px]">notifications</span>
+        {unread > 0 && (
+          <span className="absolute top-1 right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center leading-none">
+            {unread > 9 ? '9+' : unread}
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-full mt-2 w-[340px] max-w-[calc(100vw-2rem)] bg-white dark:bg-[#181d2e] border border-gray-200 dark:border-[#2e3650] rounded-xl shadow-xl shadow-black/5 z-50 overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-[#2e3650]">
+            <span className="text-sm font-semibold text-gray-800 dark:text-[#e1e3f0]">Notifications</span>
+            {unread > 0 && (
+              <button
+                onClick={markAll}
+                className="text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:underline"
+              >
+                Mark all read
+              </button>
+            )}
+          </div>
+          <div className="max-h-[380px] overflow-y-auto">
+            {loading ? (
+              <div className="px-4 py-6 text-center text-sm text-gray-400 dark:text-[#8d95b0]">Loading...</div>
+            ) : items.length === 0 ? (
+              <div className="px-4 py-10 text-center">
+                <span className="material-symbols-outlined text-[32px] text-gray-300 dark:text-[#3a4260]">notifications_none</span>
+                <p className="mt-2 text-sm text-gray-500 dark:text-[#8d95b0]">You're all caught up</p>
+              </div>
+            ) : (
+              <ul>
+                {items.map((n) => (
+                  <li key={n.id}>
+                    <button
+                      onClick={() => handleClick(n)}
+                      className={`w-full text-left px-4 py-3 flex items-start gap-3 transition-colors hover:bg-gray-50 dark:hover:bg-[#1e2538] ${n.is_read ? 'opacity-70' : ''}`}
+                    >
+                      <span className={`mt-0.5 w-2 h-2 rounded-full shrink-0 ${n.is_read ? 'bg-gray-200 dark:bg-[#2e3650]' : 'bg-indigo-500'}`} />
+                      <span className="flex-1 min-w-0">
+                        <span className="block text-[13px] font-medium text-gray-800 dark:text-[#e1e3f0] truncate">{n.title}</span>
+                        <span className="block text-xs text-gray-500 dark:text-[#8d95b0] mt-0.5 leading-snug line-clamp-2">{n.message}</span>
+                        <span className="block text-[11px] text-gray-400 dark:text-[#5b6780] mt-1">{timeAgo(n.created_at)}</span>
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

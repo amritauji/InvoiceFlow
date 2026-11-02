@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import usePolling from '../hooks/usePolling';
 import { useAuth } from '../context/AuthContext';
+import { formatCurrency } from '../utils/currency';
+import { getErrorMessage } from '../utils/error';
 
 const stageBadgeColors = {
   submitted: 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-800',
@@ -21,8 +23,6 @@ const statusLabels = {
   returned: 'Returned',
   draft: 'Draft',
 };
-
-const deletableStatuses = ['submitted', 'returned', 'rejected'];
 
 function Dashboard() {
   const navigate = useNavigate();
@@ -47,16 +47,16 @@ function Dashboard() {
   const handleDelete = async (e, inv) => {
     e.stopPropagation();
     if (!window.confirm(`Delete invoice ${inv.invoice_number}? This action cannot be undone.`)) return;
-    setDeletingId(inv.id);
+    setDeletingId(inv.invoice_number);
     try {
-      await api.delete(`/invoices/${inv.id}`);
+      await api.delete(`/invoices/${inv.invoice_number}`);
       setToast({ type: 'success', message: `Invoice ${inv.invoice_number} deleted.` });
       fetchStats(true);
       setTimeout(() => setToast(null), 3000);
     } catch (err) {
       setToast({
         type: 'error',
-        message: err.response?.data?.error?.message || err.response?.data?.detail || 'Failed to delete invoice.',
+        message: getErrorMessage(err, 'Failed to delete invoice.'),
       });
       setTimeout(() => setToast(null), 4000);
     } finally {
@@ -91,7 +91,7 @@ function Dashboard() {
         <p className="text-sm text-gray-500 dark:text-[#8d95b0] mt-1">Overview of invoice processing metrics and pending tasks.</p>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4">
         {kpis.map((kpi) => (
           <div key={kpi.label} className={`bg-white dark:bg-[#1e2538] rounded-xl p-5 border border-gray-200 dark:border-[#2e3650] shadow-sm transition-colors ${kpi.accent || ''}`}>
             <div className="flex items-start justify-between mb-3">
@@ -112,10 +112,14 @@ function Dashboard() {
         <div className="bg-white dark:bg-[#1e2538] rounded-xl border border-gray-200 dark:border-[#2e3650] shadow-sm p-5 transition-colors">
           <h2 className="text-base font-semibold text-gray-900 dark:text-[#e1e3f0] mb-3">Amount by Status</h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            {Object.entries(stats.amount_by_status).map(([status, amount]) => (
+            {Object.entries(stats.amount_by_status).map(([status, amounts]) => (
               <div key={status} className="bg-gray-50 dark:bg-[#242c42] rounded-lg p-3 transition-colors">
                 <p className="text-xs text-gray-500 dark:text-[#8d95b0] font-medium">{statusLabels[status] || status}</p>
-                <p className="text-lg font-bold text-gray-900 dark:text-[#e1e3f0] mt-1">INR {Number(amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
+                <div className="mt-1 space-y-0.5">
+                  {Object.entries(amounts).map(([currency, amount]) => (
+                    <p key={currency} className="text-base font-bold text-gray-900 dark:text-[#e1e3f0]">{formatCurrency(amount, currency)}</p>
+                  ))}
+                </div>
               </div>
             ))}
           </div>
@@ -129,7 +133,7 @@ function Dashboard() {
             View All <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
           </button>
         </div>
-        <div className="overflow-x-auto">
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left">
             <thead>
               <tr className="border-b border-gray-100 dark:border-[#2e3650]">
@@ -151,7 +155,7 @@ function Dashboard() {
                   <tr key={inv.invoice_number} className="hover:bg-gray-50/50 dark:hover:bg-[#242c42] transition-colors cursor-pointer" onClick={() => navigate(`/invoices/${inv.invoice_number}`)}>
                     <td className="px-5 py-3.5 text-sm font-medium text-indigo-600 dark:text-indigo-400">{inv.invoice_number}</td>
                     <td className="px-5 py-3.5 text-sm font-medium text-gray-900 dark:text-[#e1e3f0]">{inv.vendor_name}</td>
-                    <td className="px-5 py-3.5 text-sm font-medium text-gray-900 dark:text-[#e1e3f0] text-right">INR {Number(inv.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                    <td className="px-5 py-3.5 text-sm font-medium text-gray-900 dark:text-[#e1e3f0] text-right">{formatCurrency(inv.amount, inv.currency)}</td>
                     <td className="px-5 py-3.5 text-center">
                       <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-[11px] font-semibold ${stageBadgeColors[inv.status] || ''}`}>
                         {statusLabels[inv.status] || inv.status}
@@ -160,20 +164,18 @@ function Dashboard() {
                     <td className="px-5 py-3.5 text-sm text-gray-500 dark:text-[#8d95b0] hidden lg:table-cell">{inv.submitter_name}</td>
                     {canDelete && (
                       <td className="px-5 py-3.5 text-right">
-                        {deletableStatuses.includes(inv.status) && (
-                          <button
-                            disabled={deletingId === inv.id}
-                            onClick={(e) => handleDelete(e, inv)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-900/20 rounded-lg hover:bg-rose-100 dark:hover:bg-rose-900/30 transition-colors disabled:opacity-50"
-                          >
-                            {deletingId === inv.id ? (
-                              <span className="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>
-                            ) : (
-                              <span className="material-symbols-outlined text-[14px]">delete</span>
-                            )}
-                            Delete
-                          </button>
-                        )}
+                        <button
+                          disabled={deletingId === inv.invoice_number}
+                          onClick={(e) => handleDelete(e, inv)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-900/20 rounded-lg hover:bg-rose-100 dark:hover:bg-rose-900/30 transition-colors disabled:opacity-50"
+                        >
+                          {deletingId === inv.invoice_number ? (
+                            <span className="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>
+                          ) : (
+                            <span className="material-symbols-outlined text-[14px]">delete</span>
+                          )}
+                          Delete
+                        </button>
                       </td>
                     )}
                   </tr>
@@ -181,6 +183,47 @@ function Dashboard() {
               )}
             </tbody>
           </table>
+        </div>
+        <div className="md:hidden divide-y divide-gray-100 dark:divide-[#2e3650]">
+          {loading ? (
+            <div className="px-5 py-8 text-center text-sm text-gray-400 dark:text-[#8d95b0]">Loading...</div>
+          ) : stats?.recent_invoices?.length === 0 ? (
+            <div className="px-5 py-8 text-center text-sm text-gray-400 dark:text-[#8d95b0]">No invoices yet</div>
+          ) : (
+            stats?.recent_invoices?.map((inv) => (
+              <div key={inv.invoice_number} onClick={() => navigate(`/invoices/${inv.invoice_number}`)} className="flex items-center gap-3 px-5 py-4 cursor-pointer active:bg-gray-50 dark:active:bg-[#242c42] transition-colors">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-semibold text-indigo-600 dark:text-indigo-400 truncate">{inv.invoice_number}</span>
+                    <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-[11px] font-semibold shrink-0 ${stageBadgeColors[inv.status] || ''}`}>
+                      {statusLabels[inv.status] || inv.status}
+                    </span>
+                  </div>
+                  <p className="text-sm font-medium text-gray-900 dark:text-[#e1e3f0] truncate mt-1">{inv.vendor_name}</p>
+                  <div className="flex items-center justify-between gap-2 mt-1">
+                    <p className="text-sm font-bold text-gray-900 dark:text-[#e1e3f0]">{formatCurrency(inv.amount, inv.currency)}</p>
+                    <div className="flex items-center gap-3 min-w-0">
+                      {inv.submitter_name && <p className="text-xs text-gray-500 dark:text-[#8d95b0] truncate">{inv.submitter_name}</p>}
+                      {canDelete && (
+                        <button
+                          disabled={deletingId === inv.invoice_number}
+                          onClick={(e) => handleDelete(e, inv)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-900/20 rounded-lg transition-colors disabled:opacity-50 shrink-0"
+                        >
+                          {deletingId === inv.invoice_number ? (
+                            <span className="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>
+                          ) : (
+                            <span className="material-symbols-outlined text-[14px]">delete</span>
+                          )}
+                          Delete
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </div>
     </div>

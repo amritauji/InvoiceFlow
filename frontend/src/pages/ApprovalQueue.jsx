@@ -5,11 +5,17 @@ import usePolling from '../hooks/usePolling';
 import { useAuth } from '../context/AuthContext';
 import ConfirmBulkApprove from '../components/ConfirmBulkApprove';
 import InvoicePreviewModal from '../components/InvoicePreviewModal';
+import { formatCurrency } from '../utils/currency';
+import { getErrorMessage } from '../utils/error';
 
 export default function ApprovalQueue() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const canBulkApprove = ['ceo', 'manager'].includes(user?.role);
+  // Permission-based gate (fallback role list for sessions cached before the
+  // backend started returning permissions).
+  const APPROVE_ROLES = ['admin', 'ceo', 'manager', 'accountant_1', 'accountant_2', 'accounts_team', 'accounts_head'];
+  const canBulkApprove = user?.permissions?.includes('approval:approve')
+    || (!Array.isArray(user?.permissions) && APPROVE_ROLES.includes(user?.role));
 
   const [invoices, setInvoices] = useState([]);
   const [total, setTotal] = useState(0);
@@ -78,9 +84,14 @@ export default function ApprovalQueue() {
       if (result.failed === 0) {
         setToast({ type: 'success', message: `${result.approved} invoice${result.approved !== 1 ? 's' : ''} approved successfully.` });
       } else {
+        const failures = (result.results || [])
+          .filter((r) => !r.success)
+          .map((r) => `${r.invoice_id.slice(0, 8)}…`)
+          .slice(0, 3)
+          .join(', ');
         setToast({
           type: 'partial',
-          message: `${result.approved} approved, ${result.failed} failed.`,
+          message: `${result.approved} approved, ${result.failed} failed${failures ? ` (${failures})` : ''}.`,
         });
       }
       setTimeout(() => setToast(null), 5000);
@@ -89,7 +100,7 @@ export default function ApprovalQueue() {
       setShowConfirmModal(false);
       setToast({
         type: 'error',
-        message: err.response?.data?.error?.message || err.response?.data?.detail || 'Bulk approval failed.',
+        message: getErrorMessage(err, 'Bulk approval failed.'),
       });
       setTimeout(() => setToast(null), 5000);
     }
@@ -124,7 +135,7 @@ export default function ApprovalQueue() {
       </div>
 
       <div className="bg-white dark:bg-[#1e2538] rounded-xl border border-gray-200 dark:border-[#2e3650] shadow-sm overflow-hidden transition-colors">
-        <div className="overflow-x-auto">
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full">
             <thead>
               <tr className="border-b border-gray-100 dark:border-[#2e3650]">
@@ -192,7 +203,7 @@ export default function ApprovalQueue() {
                     </td>
                     <td className="px-5 py-3.5 text-sm font-medium text-gray-900 dark:text-[#e1e3f0]">{inv.vendor_name}</td>
                     <td className="px-5 py-3.5 text-sm font-medium text-gray-900 dark:text-[#e1e3f0] text-right font-mono">
-                      INR {Number(inv.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      {formatCurrency(inv.amount, inv.currency)}
                     </td>
                     <td className="px-5 py-3.5 text-sm text-gray-500 dark:text-[#8d95b0] max-w-[180px] truncate" title={inv.remarks || ''}>
                       {inv.remarks || '-'}
@@ -213,6 +224,62 @@ export default function ApprovalQueue() {
               )}
             </tbody>
           </table>
+        </div>
+
+        <div className="md:hidden divide-y divide-gray-100 dark:divide-[#2e3650]">
+          {loading ? (
+            <div className="px-5 py-12 text-center">
+              <div className="flex items-center justify-center gap-2 text-gray-400 dark:text-[#8d95b0]">
+                <span className="material-symbols-outlined text-[20px] animate-spin">progress_activity</span>
+                <span className="text-sm">Loading queue...</span>
+              </div>
+            </div>
+          ) : invoices.length === 0 ? (
+            <div className="px-5 py-12 text-center">
+              <div className="flex flex-col items-center text-gray-300 dark:text-[#8d95b0]">
+                <span className="material-symbols-outlined text-[48px]">inbox</span>
+                <p className="text-sm text-gray-400 dark:text-[#8d95b0] mt-3 font-medium">No pending invoices</p>
+              </div>
+            </div>
+          ) : (
+            invoices.map((inv) => (
+              <div key={inv.id} className={`px-4 py-4 space-y-2.5 transition-colors ${selectedIds.has(inv.id) ? 'bg-indigo-50/50 dark:bg-indigo-900/10' : ''}`}>
+                <div className="flex items-center gap-3">
+                  {canBulkApprove && (
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(inv.id)}
+                      onChange={() => toggleSelect(inv.id)}
+                      className="w-5 h-5 rounded border-gray-300 dark:border-[#8d95b0] text-indigo-600 focus:ring-indigo-500 cursor-pointer shrink-0"
+                    />
+                  )}
+                  <button
+                    onClick={() => setPreviewInvoiceId(inv.id)}
+                    className="flex-1 min-w-0 text-left text-sm font-semibold text-indigo-600 dark:text-indigo-400 hover:underline truncate"
+                  >
+                    {inv.invoice_number}
+                  </button>
+                  <button
+                    onClick={() => navigate(`/invoices/${inv.id}`)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white text-xs font-medium rounded-lg hover:bg-indigo-700 transition-colors shrink-0"
+                  >
+                    <span className="material-symbols-outlined text-[14px]">fact_check</span> Review
+                  </button>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-gray-900 dark:text-[#e1e3f0] truncate">{inv.vendor_name}</p>
+                  <p className="text-xs text-gray-500 dark:text-[#8d95b0] truncate mt-0.5">
+                    {inv.submitter_name || 'Unknown'}
+                    {inv.department_name ? ` · ${inv.department_name}` : ''}
+                  </p>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm font-bold font-mono text-gray-900 dark:text-[#e1e3f0] shrink-0">{formatCurrency(inv.amount, inv.currency)}</p>
+                  {inv.remarks && <p className="text-xs text-gray-500 dark:text-[#8d95b0] truncate" title={inv.remarks}>{inv.remarks}</p>}
+                </div>
+              </div>
+            ))
+          )}
         </div>
 
         {canBulkApprove && selectedIds.size > 0 && (
@@ -238,9 +305,23 @@ export default function ApprovalQueue() {
               <button className="p-1.5 rounded-lg text-gray-400 dark:text-[#8d95b0] hover:bg-gray-100 dark:hover:bg-[#242c42] disabled:opacity-40" disabled={page === 0} onClick={() => setPage(p => p - 1)}>
                 <span className="material-symbols-outlined text-[18px]">chevron_left</span>
               </button>
-              {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => (
-                <button key={i} onClick={() => setPage(i)} className={`w-8 h-8 rounded-lg text-xs font-medium transition-colors ${page === i ? 'bg-indigo-600 text-white' : 'text-gray-600 dark:text-[#8d95b0] hover:bg-gray-100 dark:hover:bg-[#242c42]'}`}>{i + 1}</button>
-              ))}
+              {(() => {
+                const pageNos = [];
+                const start = Math.max(0, Math.min(page - 2, totalPages - 5));
+                const end = Math.min(totalPages, start + 5);
+                if (start > 0) {
+                  pageNos.push(0);
+                  if (start > 1) pageNos.push('…');
+                }
+                for (let i = start; i < end; i++) pageNos.push(i);
+                if (end < totalPages) {
+                  if (end < totalPages - 1) pageNos.push('…');
+                  pageNos.push(totalPages - 1);
+                }
+                return pageNos.map((p) => p === '…'
+                  ? <span key={p + Math.random()} className="w-8 h-8 flex items-center justify-center text-xs text-gray-400 dark:text-[#8d95b0]">…</span>
+                  : <button key={p} onClick={() => setPage(p)} className={`w-8 h-8 rounded-lg text-xs font-medium transition-colors ${page === p ? 'bg-indigo-600 text-white' : 'text-gray-600 dark:text-[#8d95b0] hover:bg-gray-100 dark:hover:bg-[#242c42]'}`}>{p + 1}</button>);
+              })()}
               <button className="p-1.5 rounded-lg text-gray-600 dark:text-[#8d95b0] hover:bg-gray-100 dark:hover:bg-[#242c42] disabled:opacity-40" disabled={page >= totalPages - 1} onClick={() => setPage(p => p + 1)}>
                 <span className="material-symbols-outlined text-[18px]">chevron_right</span>
               </button>

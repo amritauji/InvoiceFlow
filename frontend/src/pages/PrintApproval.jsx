@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import { getErrorMessage } from '../utils/error';
 
 export default function PrintApproval() {
   const { id } = useParams();
@@ -26,7 +27,7 @@ export default function PrintApproval() {
         const url = URL.createObjectURL(blob);
         setPdfUrl(url);
       } catch (err) {
-        setError(err.response?.data?.detail || 'Failed to load invoice PDF. Only approved invoices can be printed.');
+        setError(getErrorMessage(err, 'Failed to load invoice PDF. Only approved invoices can be printed.'));
       } finally {
         setLoading(false);
       }

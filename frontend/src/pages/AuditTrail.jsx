@@ -33,7 +33,7 @@ export default function AuditTrail() {
       </div>
 
       <div className="bg-white dark:bg-[#1e2538] rounded-xl border border-gray-200 dark:border-[#2e3650] shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left">
             <thead>
               <tr className="border-b border-gray-100 dark:border-[#2e3650]">
@@ -75,6 +75,35 @@ export default function AuditTrail() {
               )}
             </tbody>
           </table>
+        </div>
+
+        <div className="md:hidden divide-y divide-gray-50 dark:divide-[#2e3650]">
+          {loading ? (
+            <div className="px-5 py-8 text-center text-sm text-gray-400 dark:text-[#8d95b0]">Loading...</div>
+          ) : logs.length === 0 ? (
+            <div className="px-5 py-8 text-center text-sm text-gray-400 dark:text-[#8d95b0]">No audit logs found</div>
+          ) : (
+            logs.map((log) => (
+              <div key={log.id} className="px-5 py-4">
+                <div className="flex items-center justify-between gap-2">
+                  <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-[11px] font-semibold truncate ${actionColors[log.action] || 'bg-gray-100 text-gray-700 dark:bg-gray-800/50 dark:text-gray-400'}`}>
+                    {log.action}
+                  </span>
+                  {log.created_at && <span className="text-[11px] text-gray-400 dark:text-[#8d95b0] shrink-0">{new Date(log.created_at).toLocaleString()}</span>}
+                </div>
+                <p className="text-sm font-medium text-gray-900 dark:text-[#e1e3f0] mt-2 truncate">
+                  {log.actor_email || '-'}
+                  {log.actor_role ? <span className="text-xs text-gray-400 dark:text-[#8d95b0] font-normal"> · {log.actor_role}</span> : null}
+                </p>
+                <p className="text-xs text-gray-500 dark:text-[#8d95b0] mt-1 truncate">
+                  {log.resource_type} {log.resource_id ? `#${log.resource_id.slice(0, 8)}` : ''}
+                </p>
+                {log.details && (
+                  <p className="text-xs text-gray-400 dark:text-[#8d95b0] mt-1 line-clamp-2">{JSON.stringify(log.details)}</p>
+                )}
+              </div>
+            ))
+          )}
         </div>
         {Math.ceil(total / limit) > 1 && (
           <div className="flex items-center justify-between px-5 py-3 border-t border-gray-100 dark:border-[#2e3650]">

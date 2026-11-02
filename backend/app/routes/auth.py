@@ -5,7 +5,7 @@ import uuid
 from app.database import async_session_factory
 from app.schemas import LoginRequest, RefreshRequest
 from app.services.auth_service import AuthService
-from app.core.dependencies import get_current_user, UserContext
+from app.core.dependencies import get_current_user, UserContext, ROLE_PERMISSIONS, UserRole
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -35,6 +35,7 @@ async def login(body: LoginRequest):
                 "full_name": profile.full_name if profile else "",
                 "role": profile.role if profile else "",
                 "department_id": str(profile.department_id) if profile and profile.department_id else None,
+                "permissions": sorted(ROLE_PERMISSIONS.get(UserRole(profile.role), [])) if profile else [],
             },
         },
     }
@@ -81,5 +82,6 @@ async def get_me(current_user: UserContext = Depends(get_current_user)):
             "department_id": current_user.department_id,
             "department_name": dept_name,
             "is_active": profile.is_active if profile else True,
+            "permissions": sorted(ROLE_PERMISSIONS.get(current_user.role, [])),
         },
     }

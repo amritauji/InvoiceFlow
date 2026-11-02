@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import api from '../services/api';
 
 const roleLabels = {
@@ -26,6 +26,29 @@ const workflowStages = [
   { icon: 'verified_user', role: 'CEO', desc: 'Final', color: 'bg-white border-2 border-gray-300 text-gray-400 ring-gray-100 dark:bg-[#1e2538] dark:border-[#454653] dark:text-[#8d95b0] dark:ring-[#1e2538]' },
 ];
 
+function ConfirmDialog({ isOpen, onClose, onConfirm, title, message, confirmText = 'Confirm', danger = false }) {
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center bg-black/40 backdrop-blur-sm p-4 overflow-y-auto" onClick={onClose}>
+      <div className="bg-white dark:bg-[#1e2538] rounded-2xl shadow-2xl border border-gray-200 dark:border-[#2e3650] w-full max-w-sm overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div className="px-6 py-5 text-center">
+          <div className={`mx-auto w-12 h-12 rounded-full flex items-center justify-center mb-4 ${danger ? 'bg-rose-100 dark:bg-rose-900/30' : 'bg-indigo-100 dark:bg-indigo-900/30'}`}>
+            <span className={`material-symbols-outlined text-[24px] ${danger ? 'text-rose-600 dark:text-rose-400' : 'text-indigo-600 dark:text-indigo-400'}`}>
+              {danger ? 'delete' : 'info'}
+            </span>
+          </div>
+          <h3 className="text-base font-semibold text-gray-900 dark:text-[#e1e3f0]">{title}</h3>
+          <p className="text-sm text-gray-500 dark:text-[#8d95b0] mt-2">{message}</p>
+        </div>
+        <div className="px-6 py-4 border-t border-gray-100 dark:border-[#2e3650] flex justify-center gap-3">
+          <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-600 dark:text-[#8d95b0] hover:bg-gray-100 dark:hover:bg-[#242c42] rounded-lg transition-colors">Cancel</button>
+          <button onClick={onConfirm} className={`px-4 py-2 text-sm font-medium text-white rounded-lg transition-colors shadow-sm ${danger ? 'bg-rose-600 hover:bg-rose-700' : 'bg-indigo-600 hover:bg-indigo-700'}`}>{confirmText}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function UserFormModal({ isOpen, onClose, onSave, user, departments }) {
   const [form, setForm] = useState({ full_name: '', email: '', password: '', role: 'department_user', department_id: '', phone: '' });
   useEffect(() => {
@@ -40,8 +63,8 @@ function UserFormModal({ isOpen, onClose, onSave, user, departments }) {
   const isEdit = !!user;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-white dark:bg-[#1e2538] rounded-2xl shadow-2xl border border-gray-200 dark:border-[#2e3650] w-full max-w-md mx-4 overflow-hidden" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center bg-black/40 backdrop-blur-sm p-4 overflow-y-auto" onClick={onClose}>
+      <div className="bg-white dark:bg-[#1e2538] rounded-2xl shadow-2xl border border-gray-200 dark:border-[#2e3650] w-full max-w-md overflow-hidden" onClick={(e) => e.stopPropagation()}>
         <div className="px-6 py-4 border-b border-gray-100 dark:border-[#2e3650] flex items-center justify-between">
           <h3 className="text-base font-semibold text-gray-900 dark:text-[#e1e3f0]">{isEdit ? 'Edit User' : 'New User'}</h3>
           <button onClick={onClose} className="p-1 rounded-lg text-gray-400 dark:text-[#8d95b0] hover:bg-gray-100 dark:hover:bg-[#242c42] hover:text-gray-600 dark:hover:text-[#e1e3f0] transition-colors">
@@ -55,14 +78,14 @@ function UserFormModal({ isOpen, onClose, onSave, user, departments }) {
           </div>
           <div>
             <label className="text-[11px] font-semibold text-gray-500 dark:text-[#8d95b0] uppercase tracking-wider">Email</label>
-            <input type="email" className="w-full mt-1 px-3 py-2 border border-gray-200 dark:border-[#2e3650] dark:bg-[#242c42] dark:text-[#e1e3f0] rounded-lg text-sm outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} disabled={isEdit} />
+            <input type="email" className="w-full mt-1 px-3 py-2 border border-gray-200 dark:border-[#2e3650] dark:bg-[#242c42] dark:text-[#e1e3f0] rounded-lg text-sm outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+            {isEdit && <p className="text-[10px] text-gray-400 dark:text-[#8d95b0] mt-1">Changing email will update the login credential in Supabase Auth.</p>}
           </div>
-          {!isEdit && (
-            <div>
-              <label className="text-[11px] font-semibold text-gray-500 dark:text-[#8d95b0] uppercase tracking-wider">Password</label>
-              <input type="password" className="w-full mt-1 px-3 py-2 border border-gray-200 dark:border-[#2e3650] dark:bg-[#242c42] dark:text-[#e1e3f0] rounded-lg text-sm outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
-            </div>
-          )}
+          <div>
+            <label className="text-[11px] font-semibold text-gray-500 dark:text-[#8d95b0] uppercase tracking-wider">Password {isEdit ? '(leave blank to keep current)' : ''}</label>
+            <input type="password" className="w-full mt-1 px-3 py-2 border border-gray-200 dark:border-[#2e3650] dark:bg-[#242c42] dark:text-[#e1e3f0] rounded-lg text-sm outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder={isEdit ? 'Enter new password' : ''} />
+            {isEdit && form.password && form.password.length < 8 && <p className="text-[10px] text-rose-500 dark:text-rose-400 mt-1">Min 8 chars, 1 uppercase, 1 lowercase, 1 digit.</p>}
+          </div>
           <div>
             <label className="text-[11px] font-semibold text-gray-500 dark:text-[#8d95b0] uppercase tracking-wider">Role</label>
             <select className="w-full mt-1 px-3 py-2 border border-gray-200 dark:border-[#2e3650] dark:bg-[#242c42] dark:text-[#e1e3f0] rounded-lg text-sm bg-white outline-none focus:border-indigo-500 transition-colors" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
@@ -104,8 +127,8 @@ function DeptFormModal({ isOpen, onClose, onSave, department }) {
   const isEdit = !!department;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-white dark:bg-[#1e2538] rounded-2xl shadow-2xl border border-gray-200 dark:border-[#2e3650] w-full max-w-sm mx-4 overflow-hidden" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center bg-black/40 backdrop-blur-sm p-4 overflow-y-auto" onClick={onClose}>
+      <div className="bg-white dark:bg-[#1e2538] rounded-2xl shadow-2xl border border-gray-200 dark:border-[#2e3650] w-full max-w-sm overflow-hidden" onClick={(e) => e.stopPropagation()}>
         <div className="px-6 py-4 border-b border-gray-100 dark:border-[#2e3650] flex items-center justify-between">
           <h3 className="text-base font-semibold text-gray-900 dark:text-[#e1e3f0]">{isEdit ? 'Edit Department' : 'New Department'}</h3>
           <button onClick={onClose} className="p-1 rounded-lg text-gray-400 dark:text-[#8d95b0] hover:bg-gray-100 dark:hover:bg-[#242c42] transition-colors">
@@ -139,38 +162,56 @@ export default function AdminManagement() {
   const [activeTab, setActiveTab] = useState('users');
   const [users, setUsers] = useState([]);
   const [departments, setDepartments] = useState([]);
+  const [roles, setRoles] = useState([]);
   const [totalUsers, setTotalUsers] = useState(0);
   const [userPage, setUserPage] = useState(0);
   const [search, setSearch] = useState('');
+  const [roleFilter, setRoleFilter] = useState('');
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState(null);
   const limit = 10;
 
   const [userModal, setUserModal] = useState({ open: false, user: null });
   const [deptModal, setDeptModal] = useState({ open: false, dept: null });
+  const [deleteConfirm, setDeleteConfirm] = useState({ open: false, user: null });
+  const [expandedRole, setExpandedRole] = useState(null);
 
-  const fetchUsers = () => {
+  const fetchUsers = useCallback(() => {
     setLoading(true);
-    api.get('/admin/users', { params: { limit, offset: userPage * limit } })
+    const params = { limit, offset: userPage * limit };
+    if (roleFilter) params.role = roleFilter;
+    api.get('/admin/users', { params })
       .then(({ data }) => { setUsers(data.data); setTotalUsers(data.meta.total); })
       .catch(() => {})
       .finally(() => setLoading(false));
-  };
+  }, [userPage, roleFilter]);
 
-  const fetchDepartments = () => {
+  const fetchDepartments = useCallback(() => {
     api.get('/admin/departments')
       .then(({ data }) => setDepartments(data.data))
       .catch(() => {});
-  };
+  }, []);
 
-  useEffect(() => { fetchUsers(); }, [userPage]);
-  useEffect(() => { fetchDepartments(); }, []);
+  const fetchRoles = useCallback(() => {
+    api.get('/admin/roles')
+      .then(({ data }) => setRoles(data.data))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => { fetchUsers(); }, [fetchUsers]);
+  useEffect(() => { fetchDepartments(); fetchRoles(); }, [fetchDepartments, fetchRoles]);
 
   const filteredUsers = useMemo(() => {
     if (!search.trim()) return users;
     const q = search.toLowerCase();
     return users.filter((u) => u.full_name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q));
   }, [users, search]);
+
+  const roleStats = useMemo(() => {
+    const stats = {};
+    users.forEach((u) => { stats[u.role] = (stats[u.role] || 0) + 1; });
+    return stats;
+  }, [users]);
 
   const deptMemberCounts = useMemo(() => {
     const counts = {};
@@ -180,20 +221,29 @@ export default function AdminManagement() {
     return counts;
   }, [users]);
 
-  const showToast = (type, message) => {
+  const showToast = useCallback((type, message) => {
     setToast({ type, message });
     setTimeout(() => setToast(null), 4000);
-  };
+  }, []);
 
   const handleSaveUser = async (form) => {
     try {
       if (userModal.user) {
-        await api.patch(`/admin/users/${userModal.user.id}`, {
+        const payload = {
           full_name: form.full_name,
           role: form.role,
           department_id: form.department_id || null,
           phone: form.phone || null,
-        });
+        };
+        // Only send email if it changed
+        if (form.email !== userModal.user.email) {
+          payload.email = form.email;
+        }
+        // Only send password if user entered one
+        if (form.password && form.password.trim()) {
+          payload.password = form.password;
+        }
+        await api.patch(`/admin/users/${userModal.user.id}`, payload);
         showToast('success', 'User updated successfully');
       } else {
         await api.post('/admin/users', form);
@@ -206,13 +256,36 @@ export default function AdminManagement() {
     }
   };
 
+  const handleQuickRoleChange = async (userId, newRole) => {
+    try {
+      await api.patch(`/admin/users/${userId}`, { role: newRole });
+      showToast('success', `Role changed to ${roleLabels[newRole]}`);
+      fetchUsers();
+    } catch {
+      showToast('error', 'Failed to change role');
+      fetchUsers();
+    }
+  };
+
   const handleToggleUser = async (userId, currentActive) => {
     try {
       await api.patch(`/admin/users/${userId}`, { is_active: !currentActive });
       showToast('success', currentActive ? 'User disabled' : 'User enabled');
       fetchUsers();
-    } catch (err) {
+    } catch {
       showToast('error', 'Failed to update user status');
+    }
+  };
+
+  const handleDeleteUser = async () => {
+    if (!deleteConfirm.user) return;
+    try {
+      const res = await api.delete(`/admin/users/${deleteConfirm.user.id}`);
+      showToast('success', res.data?.message || `${deleteConfirm.user.full_name} has been removed`);
+      setDeleteConfirm({ open: false, user: null });
+      fetchUsers();
+    } catch (err) {
+      showToast('error', err.response?.data?.error?.message || 'Failed to delete user');
     }
   };
 
@@ -234,6 +307,13 @@ export default function AdminManagement() {
 
   const totalPages = Math.ceil(totalUsers / limit);
 
+  const tabs = [
+    { key: 'users', label: 'Users', icon: 'people' },
+    { key: 'roles', label: 'Roles & Permissions', icon: 'shield' },
+    { key: 'departments', label: 'Departments', icon: 'business' },
+    { key: 'workflow', label: 'Workflow', icon: 'account_tree' },
+  ];
+
   return (
     <div className="p-4 lg:p-6 space-y-4 min-h-[calc(100vh-4rem)] dark:bg-[#0b1326]">
       {toast && (
@@ -251,36 +331,62 @@ export default function AdminManagement() {
 
       <UserFormModal isOpen={userModal.open} onClose={() => setUserModal({ open: false, user: null })} onSave={handleSaveUser} user={userModal.user} departments={departments} />
       <DeptFormModal isOpen={deptModal.open} onClose={() => setDeptModal({ open: false, dept: null })} onSave={handleSaveDept} department={deptModal.dept} />
+      <ConfirmDialog
+        isOpen={deleteConfirm.open}
+        onClose={() => setDeleteConfirm({ open: false, user: null })}
+        onConfirm={handleDeleteUser}
+        title="Remove User"
+        message={`Are you sure you want to remove ${deleteConfirm.user?.full_name || ''}? This action cannot be undone.`}
+        confirmText="Remove User"
+        danger
+      />
 
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-[#e1e3f0]">Admin Management</h1>
-          <p className="text-sm text-gray-500 dark:text-[#8d95b0] mt-1">Configure users, departments, and approval workflows.</p>
+          <p className="text-sm text-gray-500 dark:text-[#8d95b0] mt-1">Manage users, roles, departments, and approval workflows.</p>
         </div>
         <div className="flex gap-3 w-full sm:w-auto">
-          <button onClick={() => setUserModal({ open: true, user: null })} className="flex-1 sm:flex-none px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-semibold hover:bg-indigo-700 transition-colors shadow-sm flex items-center justify-center gap-2">
+          <button onClick={() => setUserModal({ open: true, user: null })} className="flex-1 sm:flex-none px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-semibold hover:bg-indigo-700 transition-colors shadow-sm flex items-center justify-center gap-2 cursor-pointer">
             <span className="material-symbols-outlined text-[16px]">person_add</span> New User
           </button>
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-2 border-b border-gray-200 dark:border-[#2e3650] overflow-x-auto">
+      {/* Stats Cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
-          { key: 'users', label: 'Users' },
-          { key: 'departments', label: 'Departments' },
-          { key: 'workflow', label: 'Workflow Configuration' },
-        ].map((tab) => (
+          { label: 'Total Users', value: totalUsers, icon: 'group', color: 'bg-indigo-50 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400' },
+          { label: 'Active', value: users.filter((u) => u.is_active).length, icon: 'check_circle', color: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400' },
+          { label: 'Departments', value: departments.length, icon: 'business', color: 'bg-amber-50 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400' },
+          { label: 'Roles Defined', value: 8, icon: 'shield', color: 'bg-purple-50 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400' },
+        ].map((stat) => (
+          <div key={stat.label} className="bg-white dark:bg-[#1e2538] rounded-xl border border-gray-200 dark:border-[#2e3650] p-4 flex items-center gap-3">
+            <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${stat.color}`}>
+              <span className="material-symbols-outlined text-[20px]">{stat.icon}</span>
+            </div>
+            <div>
+              <div className="text-lg font-bold text-gray-900 dark:text-[#e1e3f0]">{stat.value}</div>
+              <div className="text-[11px] text-gray-500 dark:text-[#8d95b0] font-medium">{stat.label}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Tabs */}
+      <div className="flex gap-1 border-b border-gray-200 dark:border-[#2e3650] overflow-x-auto">
+        {tabs.map((tab) => (
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
-            className={`px-4 py-2.5 border-b-2 text-xs font-semibold tracking-wide whitespace-nowrap transition-colors ${
+            className={`px-4 py-2.5 border-b-2 text-xs font-semibold tracking-wide whitespace-nowrap transition-colors flex items-center gap-1.5 cursor-pointer ${
               activeTab === tab.key
                 ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
                 : 'border-transparent text-gray-500 dark:text-[#8d95b0] hover:text-gray-700 dark:hover:text-[#e1e3f0]'
             }`}
           >
+            <span className="material-symbols-outlined text-[16px]">{tab.icon}</span>
             {tab.label}
           </button>
         ))}
@@ -291,20 +397,30 @@ export default function AdminManagement() {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
           {/* Users Table */}
           <section className="lg:col-span-8 bg-white dark:bg-[#1e2538] rounded-xl border border-gray-200 dark:border-[#2e3650] shadow-sm overflow-hidden flex flex-col" style={{ minHeight: '600px' }}>
-            <div className="p-4 border-b border-gray-100 dark:border-[#2e3650] flex justify-between items-center">
+            <div className="p-4 border-b border-gray-100 dark:border-[#2e3650] flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
               <h2 className="text-sm font-semibold text-gray-900 dark:text-[#e1e3f0]">User Directory</h2>
-              <div className="relative">
-                <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-[#8d95b0] text-[16px]">search</span>
-                <input
-                  className="pl-9 pr-3 py-1.5 rounded-lg border border-gray-200 dark:border-[#2e3650] bg-white dark:bg-[#242c42] text-sm w-56 dark:text-[#e1e3f0] focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all placeholder:text-gray-400 dark:placeholder:text-[#8d95b0]"
-                  placeholder="Search users..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                />
+              <div className="flex gap-2 w-full sm:w-auto">
+                <select
+                  className="px-3 py-1.5 rounded-lg border border-gray-200 dark:border-[#2e3650] bg-white dark:bg-[#242c42] text-sm dark:text-[#e1e3f0] focus:ring-2 focus:ring-indigo-500 outline-none transition-all cursor-pointer"
+                  value={roleFilter}
+                  onChange={(e) => { setRoleFilter(e.target.value); setUserPage(0); }}
+                >
+                  <option value="">All Roles</option>
+                  {Object.entries(roleLabels).map(([val, label]) => <option key={val} value={val}>{label}</option>)}
+                </select>
+                <div className="relative">
+                  <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-[#8d95b0] text-[16px]">search</span>
+                  <input
+                    className="pl-9 pr-3 py-1.5 rounded-lg border border-gray-200 dark:border-[#2e3650] bg-white dark:bg-[#242c42] text-sm w-48 dark:text-[#e1e3f0] focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all placeholder:text-gray-400 dark:placeholder:text-[#8d95b0]"
+                    placeholder="Search users..."
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                  />
+                </div>
               </div>
             </div>
             <div className="flex-1 overflow-auto">
-              <table className="w-full text-left">
+              <table className="w-full text-left min-w-[720px]">
                 <thead className="sticky top-0 bg-gray-50 dark:bg-[#242c42] border-b border-gray-100 dark:border-[#2e3650]">
                   <tr>
                     <th className="px-4 py-2.5 text-[11px] font-semibold text-gray-500 dark:text-[#8d95b0] uppercase tracking-wider">User</th>
@@ -335,11 +451,16 @@ export default function AdminManagement() {
                               </div>
                             </div>
                           </td>
-                          <td className="px-4 py-3 text-sm text-gray-600 dark:text-[#8d95b0]">{u.department_name || '-'}</td>
+                          <td className="px-4 py-3 text-sm text-gray-600 dark:text-[#8d95b0]">{u.department_name || <span className="text-gray-300 dark:text-[#454653]">-</span>}</td>
                           <td className="px-4 py-3">
-                            <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold tracking-wide ${roleBadgeColors[u.role] || 'bg-gray-100 text-gray-600 dark:bg-gray-800/50 dark:text-gray-400'}`}>
-                              {roleLabels[u.role] || u.role}
-                            </span>
+                            <select
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold tracking-wide border-0 outline-none cursor-pointer appearance-none pr-5 bg-no-repeat bg-[right_4px_center] bg-[length:12px] ${roleBadgeColors[u.role] || 'bg-gray-100 text-gray-600'}`}
+                              style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%236b7280'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E")` }}
+                              value={u.role}
+                              onChange={(e) => handleQuickRoleChange(u.id, e.target.value)}
+                            >
+                              {Object.entries(roleLabels).map(([val, label]) => <option key={val} value={val}>{label}</option>)}
+                            </select>
                           </td>
                           <td className="px-4 py-3">
                             <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wide ${u.is_active ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' : 'bg-gray-100 text-gray-500 dark:bg-gray-800/50 dark:text-gray-400'}`}>
@@ -347,12 +468,15 @@ export default function AdminManagement() {
                             </span>
                           </td>
                           <td className="px-4 py-3 text-right">
-                            <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <button onClick={() => setUserModal({ open: true, user: u })} className="p-1 text-gray-400 dark:text-[#8d95b0] hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors rounded" title="Edit">
+                            <div className="flex justify-end gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+                              <button onClick={() => setUserModal({ open: true, user: u })} className="p-1 text-gray-400 dark:text-[#8d95b0] hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors rounded cursor-pointer" title="Edit">
                                 <span className="material-symbols-outlined text-[16px]">edit</span>
                               </button>
-                              <button onClick={() => handleToggleUser(u.id, u.is_active)} className={`p-1 transition-colors rounded ${u.is_active ? 'text-gray-400 dark:text-[#8d95b0] hover:text-rose-600 dark:hover:text-rose-400' : 'text-gray-400 dark:text-[#8d95b0] hover:text-emerald-600 dark:hover:text-emerald-400'}`} title={u.is_active ? 'Disable' : 'Enable'}>
+                              <button onClick={() => handleToggleUser(u.id, u.is_active)} className={`p-1 transition-colors rounded cursor-pointer ${u.is_active ? 'text-gray-400 dark:text-[#8d95b0] hover:text-amber-600 dark:hover:text-amber-400' : 'text-gray-400 dark:text-[#8d95b0] hover:text-emerald-600 dark:hover:text-emerald-400'}`} title={u.is_active ? 'Disable' : 'Enable'}>
                                 <span className="material-symbols-outlined text-[16px]">{u.is_active ? 'block' : 'check_circle'}</span>
+                              </button>
+                              <button onClick={() => setDeleteConfirm({ open: true, user: u })} className="p-1 text-gray-400 dark:text-[#8d95b0] hover:text-rose-600 dark:hover:text-rose-400 transition-colors rounded cursor-pointer" title="Remove User">
+                                <span className="material-symbols-outlined text-[16px]">delete</span>
                               </button>
                             </div>
                           </td>
@@ -366,10 +490,10 @@ export default function AdminManagement() {
             <div className="px-4 py-2.5 border-t border-gray-100 dark:border-[#2e3650] bg-gray-50/50 dark:bg-[#242c42]/50 flex justify-between items-center">
               <span className="text-xs text-gray-400 dark:text-[#8d95b0]">Showing {userPage * limit + 1}-{Math.min((userPage + 1) * limit, totalUsers)} of {totalUsers}</span>
               <div className="flex gap-1">
-                <button className="p-1 rounded hover:bg-gray-200 dark:hover:bg-[#454653] text-gray-400 dark:text-[#8d95b0] disabled:opacity-40" disabled={userPage === 0} onClick={() => setUserPage((p) => p - 1)}>
+                <button className="p-1 rounded hover:bg-gray-200 dark:hover:bg-[#454653] text-gray-400 dark:text-[#8d95b0] disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed" disabled={userPage === 0} onClick={() => setUserPage((p) => p - 1)}>
                   <span className="material-symbols-outlined text-[18px]">chevron_left</span>
                 </button>
-                <button className="p-1 rounded hover:bg-gray-200 dark:hover:bg-[#454653] text-gray-400 dark:text-[#8d95b0] disabled:opacity-40" disabled={userPage >= totalPages - 1} onClick={() => setUserPage((p) => p + 1)}>
+                <button className="p-1 rounded hover:bg-gray-200 dark:hover:bg-[#454653] text-gray-400 dark:text-[#8d95b0] disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed" disabled={userPage >= totalPages - 1} onClick={() => setUserPage((p) => p + 1)}>
                   <span className="material-symbols-outlined text-[18px]">chevron_right</span>
                 </button>
               </div>
@@ -382,18 +506,18 @@ export default function AdminManagement() {
             <section className="bg-white dark:bg-[#1e2538] rounded-xl border border-gray-200 dark:border-[#2e3650] shadow-sm p-5 flex-1 flex flex-col">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-sm font-semibold text-gray-900 dark:text-[#e1e3f0]">Departments</h2>
-                <button onClick={() => setDeptModal({ open: true, dept: null })} className="text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 p-1.5 rounded-lg transition-colors" title="Add Department">
+                <button onClick={() => setDeptModal({ open: true, dept: null })} className="text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 p-1.5 rounded-lg transition-colors cursor-pointer" title="Add Department">
                   <span className="material-symbols-outlined text-[18px]">add_business</span>
                 </button>
               </div>
               <ul className="flex flex-col gap-2 overflow-y-auto flex-1">
                 {departments.map((d) => (
-                  <li key={d.id} className="flex justify-between items-center p-3 rounded-lg border border-gray-200 dark:border-[#2e3650] bg-white dark:bg-[#242c42] hover:border-indigo-300 dark:hover:border-indigo-400 transition-colors group">
+                  <li key={d.id} className="flex justify-between items-center p-3 rounded-lg border border-gray-200 dark:border-[#2e3650] bg-white dark:bg-[#242c42] hover:border-indigo-300 dark:hover:border-indigo-400 transition-colors group cursor-pointer">
                     <div className="flex flex-col min-w-0">
                       <span className="text-sm font-medium text-gray-900 dark:text-[#e1e3f0] truncate">{d.name}</span>
                       <span className="text-xs text-gray-400 dark:text-[#8d95b0]">{deptMemberCounts[d.id] || 0} Members</span>
                     </div>
-                    <button onClick={() => setDeptModal({ open: true, dept: d })} className="opacity-0 group-hover:opacity-100 text-gray-400 dark:text-[#8d95b0] hover:text-indigo-600 dark:hover:text-indigo-400 transition-all p-1 rounded">
+                    <button onClick={() => setDeptModal({ open: true, dept: d })} className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 text-gray-400 dark:text-[#8d95b0] hover:text-indigo-600 dark:hover:text-indigo-400 transition-all p-1 rounded cursor-pointer">
                       <span className="material-symbols-outlined text-[16px]">edit</span>
                     </button>
                   </li>
@@ -401,8 +525,21 @@ export default function AdminManagement() {
               </ul>
             </section>
 
+            {/* Role Distribution */}
+            <section className="bg-white dark:bg-[#1e2538] rounded-xl border border-gray-200 dark:border-[#2e3650] shadow-sm p-5">
+              <h2 className="text-sm font-semibold text-gray-900 dark:text-[#e1e3f0] mb-3">Role Distribution</h2>
+              <div className="flex flex-col gap-2">
+                {Object.entries(roleStats).sort((a, b) => b[1] - a[1]).map(([role, count]) => (
+                  <div key={role} className="flex items-center justify-between">
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold tracking-wide ${roleBadgeColors[role]}`}>{roleLabels[role]}</span>
+                    <span className="text-xs font-semibold text-gray-600 dark:text-[#8d95b0]">{count}</span>
+                  </div>
+                ))}
+              </div>
+            </section>
+
             {/* System Status */}
-            <section className="bg-indigo-600 rounded-xl text-white p-5 flex flex-col justify-between shadow-sm relative overflow-hidden" style={{ height: '140px' }}>
+            <section className="bg-indigo-600 rounded-xl text-white p-5 flex flex-col justify-between shadow-sm relative overflow-hidden" style={{ height: '120px' }}>
               <div className="absolute -right-6 -top-6 w-32 h-32 bg-white/10 rounded-full blur-2xl pointer-events-none" />
               <div className="flex items-center gap-2 z-10">
                 <span className="material-symbols-outlined text-[18px]">dns</span>
@@ -417,6 +554,51 @@ export default function AdminManagement() {
         </div>
       )}
 
+      {/* Roles & Permissions Tab */}
+      {activeTab === 'roles' && (
+        <section className="bg-white dark:bg-[#1e2538] rounded-xl border border-gray-200 dark:border-[#2e3650] shadow-sm overflow-hidden">
+          <div className="p-5 border-b border-gray-100 dark:border-[#2e3650]">
+            <h2 className="text-sm font-semibold text-gray-900 dark:text-[#e1e3f0]">Roles & Permissions Matrix</h2>
+            <p className="text-xs text-gray-500 dark:text-[#8d95b0] mt-1">Each role comes with a predefined set of permissions. Change a user's role to grant or revoke access.</p>
+          </div>
+          <div className="divide-y divide-gray-100 dark:divide-[#2e3650]">
+            {roles.map((role) => {
+              const isExpanded = expandedRole === role.value;
+              const userCount = roleStats[role.value] || 0;
+              return (
+                <div key={role.value}>
+                  <button
+                    onClick={() => setExpandedRole(isExpanded ? null : role.value)}
+                    className="w-full px-5 py-4 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-[#242c42]/50 transition-colors cursor-pointer"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className={`inline-flex items-center px-2.5 py-1 rounded text-[11px] font-bold tracking-wide ${roleBadgeColors[role.value]}`}>{role.label}</span>
+                      <span className="text-xs text-gray-400 dark:text-[#8d95b0]">{role.permissions.length} permissions</span>
+                      <span className="text-xs text-gray-400 dark:text-[#8d95b0]">middot;</span>
+                      <span className="text-xs text-gray-400 dark:text-[#8d95b0]">{userCount} user{userCount !== 1 ? 's' : ''}</span>
+                    </div>
+                    <span className={`material-symbols-outlined text-[20px] text-gray-400 dark:text-[#8d95b0] transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}>expand_more</span>
+                  </button>
+                  {isExpanded && (
+                    <div className="px-5 pb-4 bg-gray-50/50 dark:bg-[#242c42]/30">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                        {role.permissions.map((perm) => (
+                          <div key={perm.key} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white dark:bg-[#1e2538] border border-gray-200 dark:border-[#2e3650]">
+                            <span className="material-symbols-outlined text-[14px] text-emerald-500 dark:text-emerald-400">check_circle</span>
+                            <span className="text-xs font-medium text-gray-700 dark:text-[#e1e3f0]">{perm.label}</span>
+                            <span className="text-[10px] text-gray-400 dark:text-[#8d95b0] ml-auto font-mono">{perm.key}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
       {/* Departments Tab */}
       {activeTab === 'departments' && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -428,7 +610,7 @@ export default function AdminManagement() {
               </div>
               <p className="text-sm text-gray-500 dark:text-[#8d95b0]">{d.description || 'No description'}</p>
               <p className="text-xs text-gray-400 dark:text-[#8d95b0] mt-2">{deptMemberCounts[d.id] || 0} members</p>
-              <button onClick={() => setDeptModal({ open: true, dept: d })} className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 p-1 text-gray-400 dark:text-[#8d95b0] hover:text-indigo-600 dark:hover:text-indigo-400 transition-all rounded">
+              <button onClick={() => setDeptModal({ open: true, dept: d })} className="absolute top-4 right-4 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 p-1 text-gray-400 dark:text-[#8d95b0] hover:text-indigo-600 dark:hover:text-indigo-400 transition-all rounded cursor-pointer">
                 <span className="material-symbols-outlined text-[16px]">edit</span>
               </button>
             </div>

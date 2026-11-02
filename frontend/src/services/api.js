@@ -1,9 +1,55 @@
 import axios from 'axios';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
+// Same-origin /api/v1 by default (works behind the Vite dev proxy and nginx in
+// production); override with VITE_API_URL when the API lives elsewhere.
+const API_BASE = import.meta.env.VITE_API_URL || `${window.location.origin}/api/v1`;
 
-function getToken() {
-  return localStorage.getItem('access_token');
+// In-memory token store for the access token — it never touches localStorage,
+// preventing XSS theft of the short-lived access token.
+// The refresh token is persisted (rotated on each use) so the session survives
+// a page refresh; on boot it is exchanged for a fresh access token.
+const REFRESH_STORAGE_KEY = 'invoiceflow_refresh_token';
+let _accessToken = null;
+let _refreshToken = null;
+
+function persistRefreshToken(refresh) {
+  try {
+    if (refresh) localStorage.setItem(REFRESH_STORAGE_KEY, refresh);
+    else localStorage.removeItem(REFRESH_STORAGE_KEY);
+  } catch { /* storage unavailable */ }
+}
+
+function restoreRefreshToken() {
+  try {
+    const stored = localStorage.getItem(REFRESH_STORAGE_KEY);
+    if (stored) _refreshToken = stored;
+  } catch { /* storage unavailable */ }
+}
+
+restoreRefreshToken();
+
+export function setTokens(access, refresh) {
+  _accessToken = access;
+  _refreshToken = refresh;
+  persistRefreshToken(refresh);
+}
+
+export function clearTokens() {
+  _accessToken = null;
+  _refreshToken = null;
+  persistRefreshToken(null);
+}
+
+export function hasStoredSession() {
+  return Boolean(_refreshToken);
+}
+
+export function getAccessToken() {
+  return _accessToken;
+}
+
+export function getRefreshToken() {
+  return _refreshToken;
 }
 
 function setAuthHeader(config, token) {
@@ -23,9 +69,8 @@ const api = axios.create({
 });
 
 api.interceptors.request.use((config) => {
-  const token = getToken();
-  if (token) {
-    setAuthHeader(config, token);
+  if (_accessToken) {
+    setAuthHeader(config, _accessToken);
   }
   if (config.data instanceof FormData && config.headers && typeof config.headers.delete === 'function') {
     config.headers.delete('Content-Type');
@@ -64,26 +109,22 @@ api.interceptors.response.use(
     originalRequest._retry = true;
     isRefreshing = true;
 
-    const refreshToken = localStorage.getItem('refresh_token');
-    if (!refreshToken) {
+    if (!_refreshToken) {
       isRefreshing = false;
-      localStorage.removeItem('access_token');
-      localStorage.removeItem('refresh_token');
-      localStorage.removeItem('user');
+      clearTokens();
       window.location.href = '/login';
       return Promise.reject(error);
     }
 
     try {
       const { data } = await axios.post(`${API_BASE}/auth/refresh`, {
-        refresh_token: refreshToken,
+        refresh_token: _refreshToken,
       });
 
       const newToken = data.data.access_token;
       const newRefreshToken = data.data.refresh_token;
 
-      localStorage.setItem('access_token', newToken);
-      localStorage.setItem('refresh_token', newRefreshToken);
+      setTokens(newToken, newRefreshToken);
 
       processQueue(null, newToken);
 
@@ -91,9 +132,7 @@ api.interceptors.response.use(
       return api(originalRequest);
     } catch (refreshError) {
       processQueue(refreshError, null);
-      localStorage.removeItem('access_token');
-      localStorage.removeItem('refresh_token');
-      localStorage.removeItem('user');
+      clearTokens();
       window.location.href = '/login';
       return Promise.reject(refreshError);
     } finally {

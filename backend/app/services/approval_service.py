@@ -5,6 +5,7 @@ Integrates with workflow_engine for state transitions and audit_service for logg
 """
 
 import uuid
+from datetime import datetime
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
@@ -14,13 +15,14 @@ from app.models.approval import ApprovalAction
 from app.models.user import UserProfile
 from app.models.department import Department
 from app.core.dependencies import UserContext, UserRole
-from app.core.exceptions import NotFoundException, BadRequestException
+from app.core.exceptions import NotFoundException, BadRequestException, ForbiddenException
 from app.services.workflow_engine import (
     validate_approval, validate_rejection, validate_return,
     get_first_stage, WORKFLOW_STAGES, ROLE_TO_STAGE_ORDER,
 )
 from app.services.audit_service import AuditService
 from app.services.invoice_service import resolve_invoice_id
+from app.services.notification_service import NotificationService
 
 
 class ApprovalService:
@@ -73,6 +75,44 @@ class ApprovalService:
         return ROLE_TO_STAGE_ORDER.get(actor.role)
 
     @staticmethod
+    async def _notify_review_started(
+        db: AsyncSession,
+        invoice: Invoice,
+        old_status: str,
+        actor: UserContext,
+    ) -> None:
+        """Notify the submitter when Accountant 1 (or Admin) begins reviewing.
+
+        Fires once per submission cycle: only when the invoice was still in
+        'submitted' status (i.e. no approver has acted on it yet).
+        """
+        if old_status != "submitted":
+            return
+        if actor.role not in (UserRole.ACCOUNTANT_1, UserRole.ADMIN):
+            return
+
+        await NotificationService.create(
+            db,
+            user_id=str(invoice.submitted_by),
+            invoice_id=str(invoice.id),
+            type="review_started",
+            title=f"Review started on {invoice.invoice_number}",
+            message=(
+                f"Your invoice {invoice.invoice_number} ({invoice.vendor_name}) "
+                f"is now being reviewed by {actor.full_name}."
+            ),
+        )
+
+    @staticmethod
+    def _can_self_approve(actor: UserContext) -> bool:
+        """Accountants and admins may approve/reject/return invoices they submitted."""
+        return actor.role in (
+            UserRole.ACCOUNTANT_1,
+            UserRole.ACCOUNTANT_2,
+            UserRole.ADMIN,
+        )
+
+    @staticmethod
     async def approve(
         db: AsyncSession,
         invoice_id: str,
@@ -81,14 +121,20 @@ class ApprovalService:
         comment: Optional[str] = None,
     ) -> dict:
         """Approve an invoice and advance the workflow."""
-        # Fetch invoice (supports UUID or invoice_number)
+        # Fetch invoice with a row lock so concurrent approvals/rejects/returns
+        # are serialized — the first writer wins and later requests see the new
+        # status and are rejected by workflow validation (prevents double-advance).
         inv_uuid = await resolve_invoice_id(db, invoice_id)
         result = await db.execute(
-            select(Invoice).where(Invoice.id == inv_uuid)
+            select(Invoice).where(Invoice.id == inv_uuid).with_for_update()
         )
         invoice = result.scalar_one_or_none()
         if not invoice:
             raise NotFoundException("Invoice", invoice_id)
+
+        # Prevent conflict of interest: a submitter cannot act on their own invoice
+        if str(invoice.submitted_by) == actor.id and not ApprovalService._can_self_approve(actor):
+            raise ForbiddenException("You cannot approve your own submitted invoice")
 
         # Prevent duplicate approval by same actor
         existing = await db.execute(
@@ -107,8 +153,11 @@ class ApprovalService:
         # Determine current stage order
         stage_order = await ApprovalService._determine_stage_order(db, invoice)
 
+        # Check if this is a statement-linked invoice (single-step approval)
+        is_statement_invoice = invoice.statement_transaction_id is not None
+
         # Validate and get transition
-        transition = validate_approval(actor.role, invoice.status, stage_order)
+        transition = validate_approval(actor.role, invoice.status, stage_order, is_statement_invoice=is_statement_invoice)
 
         # Apply transition
         invoice.status = transition["new_status"]
@@ -153,6 +202,35 @@ class ApprovalService:
             },
         )
 
+        await ApprovalService._notify_review_started(db, invoice, old_status, actor)
+
+        # Auto-tick the statement transaction checkbox when approved
+        if is_statement_invoice and invoice.status == "approved":
+            from app.models.statement import StatementTransaction
+            txn = await db.get(StatementTransaction, invoice.statement_transaction_id)
+            if txn and not txn.is_verified:
+                txn.is_verified = True
+                txn.verified_by = uuid.UUID(actor.id)
+                txn.verified_at = datetime.utcnow()
+
+            # Embed narration as a page appended to the PDF
+            if invoice.remarks:
+                from app.services.file_service import FileService
+                from app.services.pdf_service import PDFService
+                try:
+                    original_data = await FileService.get_original_file_for_invoice(db, str(invoice.id))
+                    if original_data:
+                        original_bytes, _ = original_data
+                        merged_bytes = PDFService.append_narration_to_pdf(original_bytes, invoice.remarks)
+                        await FileService.upload_approved_pdf(
+                            db,
+                            invoice_id=str(invoice.id),
+                            file_bytes=merged_bytes,
+                            filename=f"approved_{invoice.invoice_number}.pdf",
+                        )
+                except Exception:
+                    pass  # Non-critical: narration embedding failure should not block approval
+
         stage_name = transition.get("new_stage_name")
         next_approver = transition.get("next_approver")
         return {
@@ -178,11 +256,15 @@ class ApprovalService:
         """Reject an invoice (terminal state)."""
         inv_uuid = await resolve_invoice_id(db, invoice_id)
         result = await db.execute(
-            select(Invoice).where(Invoice.id == inv_uuid)
+            select(Invoice).where(Invoice.id == inv_uuid).with_for_update()
         )
         invoice = result.scalar_one_or_none()
         if not invoice:
             raise NotFoundException("Invoice", invoice_id)
+
+        # Prevent conflict of interest: a submitter cannot act on their own invoice
+        if str(invoice.submitted_by) == actor.id and not ApprovalService._can_self_approve(actor):
+            raise ForbiddenException("You cannot reject your own submitted invoice")
 
         old_status = invoice.status
         old_stage_id = invoice.current_stage_id
@@ -221,6 +303,8 @@ class ApprovalService:
             },
         )
 
+        await ApprovalService._notify_review_started(db, invoice, old_status, actor)
+
         return {
             "invoice_id": str(invoice.id),
             "invoice_number": invoice.invoice_number,
@@ -241,11 +325,15 @@ class ApprovalService:
         """Return an invoice to the submitter for corrections."""
         inv_uuid = await resolve_invoice_id(db, invoice_id)
         result = await db.execute(
-            select(Invoice).where(Invoice.id == inv_uuid)
+            select(Invoice).where(Invoice.id == inv_uuid).with_for_update()
         )
         invoice = result.scalar_one_or_none()
         if not invoice:
             raise NotFoundException("Invoice", invoice_id)
+
+        # Prevent conflict of interest: a submitter cannot act on their own invoice
+        if str(invoice.submitted_by) == actor.id and not ApprovalService._can_self_approve(actor):
+            raise ForbiddenException("You cannot return your own submitted invoice")
 
         old_status = invoice.status
         old_stage_id = invoice.current_stage_id
@@ -283,6 +371,8 @@ class ApprovalService:
                 "comment": comment,
             },
         )
+
+        await ApprovalService._notify_review_started(db, invoice, old_status, actor)
 
         return {
             "invoice_id": str(invoice.id),
@@ -459,6 +549,7 @@ class ApprovalService:
                 "invoice_number": inv.invoice_number,
                 "vendor_name": inv.vendor_name,
                 "amount": float(inv.amount),
+                "currency": inv.currency,
                 "remarks": inv.remarks,
                 "status": inv.status,
                 "department_name": department_name,

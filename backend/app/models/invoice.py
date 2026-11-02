@@ -13,6 +13,7 @@ class Invoice(Base):
     invoice_number: Mapped[str] = mapped_column(String(30), unique=True, nullable=False, index=True)
     vendor_name: Mapped[str] = mapped_column(String(200), nullable=False)
     amount: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, server_default="INR", default="INR")
     remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="submitted", index=True)
 
@@ -35,6 +36,11 @@ class Invoice(Base):
     )
     submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
+    # Link to statement transaction (optional — set when invoice is created from a statement)
+    statement_transaction_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("statement_transactions.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
     # Optimistic locking
     version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
 
@@ -43,6 +49,10 @@ class Invoice(Base):
 
     __table_args__ = (
         CheckConstraint("amount > 0", name="positive_amount"),
+        CheckConstraint(
+            "currency IN ('INR','USD')",
+            name="valid_currency",
+        ),
         CheckConstraint(
             "status IN ('draft','submitted','under_review','returned','approved','rejected')",
             name="valid_status",

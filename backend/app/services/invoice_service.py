@@ -3,7 +3,7 @@ import re
 from datetime import datetime
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, text
 from sqlalchemy.orm import selectinload
 
 from app.models.invoice import Invoice, InvoiceFile
@@ -16,14 +16,15 @@ _UUID_RE = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
 
 async def resolve_invoice_id(db: AsyncSession, invoice_id: str) -> uuid.UUID:
     """Resolve an invoice identifier (UUID or invoice_number) to a UUID."""
-    if _UUID_RE.match(invoice_id):
-        return uuid.UUID(invoice_id)
+    raw = str(invoice_id)
+    if _UUID_RE.match(raw):
+        return uuid.UUID(raw)
     result = await db.execute(
-        select(Invoice.id).where(Invoice.invoice_number == invoice_id)
+        select(Invoice.id).where(Invoice.invoice_number == raw)
     )
     inv_id = result.scalar_one_or_none()
     if not inv_id:
-        raise NotFoundException("Invoice", invoice_id)
+        raise NotFoundException("Invoice", raw)
     return inv_id
 
 
@@ -44,24 +45,16 @@ class InvoiceService:
 
     @staticmethod
     async def generate_invoice_number(db: AsyncSession) -> str:
-        """Generate next sequential invoice number: INV-2024-0001."""
+        """Generate next sequential invoice number: INV-2026-0001.
+
+        Uses a PostgreSQL sequence (invoice_number_seq) so concurrent requests
+        each receive a unique number atomically — no read-then-increment race.
+        """
         year = datetime.utcnow().year
-        prefix = f"INV-{year}-"
+        result = await db.execute(text("SELECT nextval('invoice_number_seq')"))
+        seq = result.scalar()
 
-        result = await db.execute(
-            select(Invoice.invoice_number)
-            .where(Invoice.invoice_number.like(f"{prefix}%"))
-            .order_by(Invoice.invoice_number.desc())
-            .limit(1)
-        )
-        last_number = result.scalar_one_or_none()
-
-        if last_number:
-            seq = int(last_number.split("-")[-1]) + 1
-        else:
-            seq = 1
-
-        return f"{prefix}{seq:04d}"
+        return f"INV-{year}-{int(seq):04d}"
 
     @staticmethod
     async def create_invoice(
@@ -69,9 +62,11 @@ class InvoiceService:
         *,
         vendor_name: str,
         amount: float,
+        currency: str = "INR",
         remarks: Optional[str],
         department_id: Optional[str] = None,
         actor: UserContext,
+        statement_transaction_id: Optional[uuid.UUID] = None,
     ) -> Invoice:
         """Create and submit a new invoice."""
         invoice_number = await InvoiceService.generate_invoice_number(db)
@@ -87,12 +82,14 @@ class InvoiceService:
             invoice_number=invoice_number,
             vendor_name=vendor_name,
             amount=amount,
+            currency=currency,
             remarks=remarks,
             department_id=dept_uuid,
             status="submitted",
             submitted_by=uuid.UUID(actor.id),
             submitted_at=datetime.utcnow(),
             version=1,
+            statement_transaction_id=statement_transaction_id,
         )
         db.add(invoice)
         await db.flush()  # Get the invoice.id
@@ -122,6 +119,15 @@ class InvoiceService:
         return invoice, submitter_name
 
     @staticmethod
+    def assert_can_view(actor: UserContext, invoice: Invoice) -> None:
+        """Department users can only view their own invoices.
+        Statement-linked invoices are restricted to accountant_1 and admin."""
+        if actor.role == UserRole.DEPARTMENT_USER and str(invoice.submitted_by) != actor.id:
+            raise ForbiddenException("You can only view your own invoices")
+        if invoice.statement_transaction_id is not None and actor.role not in (UserRole.ACCOUNTANT_1, UserRole.ADMIN):
+            raise ForbiddenException("You do not have permission to view this invoice")
+
+    @staticmethod
     async def list_invoices(
         db: AsyncSession,
         *,
@@ -139,6 +145,10 @@ class InvoiceService:
         # Role-based filtering
         if actor.role == UserRole.DEPARTMENT_USER:
             query = query.where(Invoice.submitted_by == uuid.UUID(actor.id))
+
+        # Statement-linked invoices are only visible to accountant_1 and admin
+        if actor.role not in (UserRole.ACCOUNTANT_1, UserRole.ADMIN):
+            query = query.where(Invoice.statement_transaction_id.is_(None))
 
         if status:
             query = query.where(Invoice.status == status)
@@ -160,6 +170,7 @@ class InvoiceService:
                 "invoice_number": inv.invoice_number,
                 "vendor_name": inv.vendor_name,
                 "amount": float(inv.amount),
+                "currency": inv.currency,
                 "remarks": inv.remarks,
                 "status": inv.status,
                 "submitted_by": str(inv.submitted_by),
@@ -180,6 +191,7 @@ class InvoiceService:
         *,
         vendor_name: Optional[str] = None,
         amount: Optional[float] = None,
+        currency: Optional[str] = None,
         remarks: Optional[str] = None,
         actor: UserContext,
     ) -> Invoice:
@@ -196,6 +208,8 @@ class InvoiceService:
             invoice.vendor_name = vendor_name
         if amount is not None:
             invoice.amount = amount
+        if currency is not None:
+            invoice.currency = currency
         if remarks is not None:
             invoice.remarks = remarks
 
@@ -209,12 +223,10 @@ class InvoiceService:
         *,
         actor: UserContext,
     ) -> None:
-        """Delete an invoice. Accountant 1 and Admin can delete any invoice."""
+        """Delete an invoice. Only Accountant 1 can delete any invoice regardless of status."""
         invoice = await InvoiceService.get_invoice(db, invoice_id)
 
-        if actor.role not in (UserRole.ADMIN, UserRole.ACCOUNTANT_1):
-            raise ForbiddenException("Only Admin or Accountant 1 can delete invoices")
-        if invoice.status not in ("submitted", "returned", "rejected"):
-            raise BadRequestException(f"Cannot delete invoice in '{invoice.status}' status")
+        if actor.role != UserRole.ACCOUNTANT_1:
+            raise ForbiddenException("Only Accountant 1 can delete invoices")
 
         await db.delete(invoice)

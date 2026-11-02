@@ -1,6 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import { formatCurrency } from '../utils/currency';
+import PdfViewer from './PdfViewer';
+import useMediaQuery from '../hooks/useMediaQuery';
 
 const statusColors = {
   submitted: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400',
@@ -17,11 +20,17 @@ const statusLabels = {
 
 export default function InvoicePreviewModal({ invoiceId, onClose }) {
   const navigate = useNavigate();
+  const isMobile = useMediaQuery('(max-width: 767px)');
   const [invoice, setInvoice] = useState(null);
   const [signedUrls, setSignedUrls] = useState({});
   const [activeFileIdx, setActiveFileIdx] = useState(0);
   const [loading, setLoading] = useState(true);
   const [urlLoading, setUrlLoading] = useState(true);
+
+  // Keep the latest onClose in a ref so parent re-renders (e.g. the 15s queue
+  // poll) never retrigger the fetch/Escape effects below.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     if (!invoiceId) return;
@@ -51,7 +60,7 @@ export default function InvoicePreviewModal({ invoiceId, onClose }) {
           setUrlLoading(false);
         }
       } catch {
-        if (!cancelled) onClose();
+        if (!cancelled) onCloseRef.current();
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -59,23 +68,23 @@ export default function InvoicePreviewModal({ invoiceId, onClose }) {
 
     fetchInvoice();
     return () => { cancelled = true; };
-  }, [invoiceId, onClose]);
+  }, [invoiceId]);
 
   useEffect(() => {
-    const handleEsc = (e) => { if (e.key === 'Escape') onClose(); };
+    const handleEsc = (e) => { if (e.key === 'Escape') onCloseRef.current(); };
     document.addEventListener('keydown', handleEsc);
     return () => document.removeEventListener('keydown', handleEsc);
-  }, [onClose]);
+  }, []);
 
   const files = invoice?.files || [];
   const currentFile = files[activeFileIdx] || null;
   const currentUrl = currentFile ? signedUrls[currentFile.id] : null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center overflow-y-auto" onClick={onClose}>
       <div className="absolute inset-0 bg-black/50" />
       <div
-        className="relative bg-white dark:bg-[#1e2538] rounded-2xl shadow-2xl w-full max-w-5xl h-[85vh] flex flex-col overflow-hidden border border-gray-200 dark:border-[#2e3650] transition-colors"
+        className="relative bg-white dark:bg-[#1e2538] rounded-none sm:rounded-2xl shadow-2xl w-full max-w-5xl h-[100dvh] sm:h-[85vh] flex flex-col overflow-hidden border border-gray-200 dark:border-[#2e3650] transition-colors"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -97,7 +106,7 @@ export default function InvoicePreviewModal({ invoiceId, onClose }) {
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors"
             >
               <span className="material-symbols-outlined text-[14px]">open_in_new</span>
-              Full Review
+              <span className="hidden sm:inline">Full Review</span>
             </button>
             <button
               onClick={onClose}
@@ -109,9 +118,9 @@ export default function InvoicePreviewModal({ invoiceId, onClose }) {
         </div>
 
         {/* Body */}
-        <div className="flex-1 flex min-h-0">
+        <div className="flex-1 flex flex-col sm:flex-row min-h-0">
           {/* Left: Document viewer */}
-          <div className="flex-1 flex flex-col min-w-0 border-r border-gray-100 dark:border-[#2e3650]">
+          <div className="h-[40vh] sm:h-auto flex-1 flex flex-col min-w-0 border-b sm:border-b-0 sm:border-r border-gray-100 dark:border-[#2e3650]">
             {files.length > 1 && (
               <div className="flex border-b border-gray-100 dark:border-[#2e3650] bg-white dark:bg-[#1e2538] shrink-0 overflow-x-auto transition-colors">
                 {files.map((f, i) => (
@@ -142,7 +151,11 @@ export default function InvoicePreviewModal({ invoiceId, onClose }) {
                 </div>
               ) : currentUrl ? (
                 currentFile?.mime_type === 'application/pdf' ? (
-                  <iframe src={currentUrl} className="w-full h-full border-0" title={currentFile.file_name} />
+                  isMobile ? (
+                    <PdfViewer url={currentUrl} fileName={currentFile.file_name} />
+                  ) : (
+                    <iframe src={currentUrl} className="w-full h-full border-0" title={currentFile.file_name} />
+                  )
                 ) : (
                   <div className="w-full h-full overflow-auto flex items-start justify-center p-4">
                     <img src={currentUrl} alt={currentFile?.file_name} className="max-w-full h-auto object-contain rounded shadow-sm" />
@@ -163,7 +176,7 @@ export default function InvoicePreviewModal({ invoiceId, onClose }) {
           </div>
 
           {/* Right: Invoice details */}
-          <div className="w-80 shrink-0 overflow-y-auto p-5 space-y-5 bg-white dark:bg-[#1e2538] transition-colors">
+          <div className="flex-1 min-h-0 sm:flex-none sm:w-80 overflow-y-auto p-5 space-y-5 bg-white dark:bg-[#1e2538] transition-colors">
             {loading ? (
               <div className="flex items-center justify-center py-12 text-gray-400 dark:text-[#8d95b0]">
                 <span className="material-symbols-outlined text-[20px] animate-spin">progress_activity</span>
@@ -179,7 +192,7 @@ export default function InvoicePreviewModal({ invoiceId, onClose }) {
                   <div>
                     <p className="text-[10px] font-semibold text-gray-400 dark:text-[#8d95b0] uppercase tracking-wider">Amount</p>
                     <p className="text-lg font-bold text-gray-900 dark:text-[#e1e3f0] mt-0.5">
-                      INR {Number(invoice.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      {formatCurrency(invoice.amount, invoice.currency)}
                     </p>
                   </div>
                   <div>
